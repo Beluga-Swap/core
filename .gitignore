@@ -1,0 +1,46 @@
+# ----------------------------------------------------------------------------
+# 🦀 RUST & CARGO (Wajib Banget)
+# ----------------------------------------------------------------------------
+# Folder build (isinya sampah binary yang gede banget)
+/target/
+
+# Backup file dari Rustfmt
+**/*.rs.bk
+
+# ----------------------------------------------------------------------------
+# 🌌 SOROBAN & WASM
+# ----------------------------------------------------------------------------
+# Folder config/identity local soroban (Isinya private key local, JANGAN COMMIT)
+.soroban/
+
+# Compiled WASM files (Kecuali kamu mau simpan versi final di folder khusus)
+*.wasm
+
+# Optimization artifacts
+optimization-reports/
+
+# ----------------------------------------------------------------------------
+# 🔐 SECURITY (Haram hukumnya masuk repo)
+# ----------------------------------------------------------------------------
+.env
+.env.local
+wallet.json
+secret.key
+
+# ----------------------------------------------------------------------------
+# 💻 IDE & OS (Supaya config laptopmu gak kebawa ke orang lain)
+# ----------------------------------------------------------------------------
+# VS Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# IntelliJ / RustRover
+.idea/
+*.iml
+
+# Mac / Linux / Windows trash
+.DS_Store
+Thumbs.db

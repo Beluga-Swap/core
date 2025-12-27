@@ -40,7 +40,7 @@ rustup target add wasm32-unknown-unknown
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/belugaswap-core
+git clone git clone https://github.com/Beluga-Swap/core.git
 cd belugaswap-core
 
 # Clean build (recommended)

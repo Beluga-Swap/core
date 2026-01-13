@@ -77,8 +77,8 @@ belugaswap/
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/your-org/belugaswap.git
-   cd belugaswap
+   git clone https://github.com/Beluga-Swap/core.git
+   cd core
    ```
 
 2. **Install Soroban toolchain**

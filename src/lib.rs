@@ -20,9 +20,9 @@ mod types;
 // IMPORTS
 // ============================================================
 
-use constants::{MAX_FEE_BPS, MAX_PROTOCOL_FEE_BPS};
-use error::{ErrorMsg, ErrorSymbol};
-use events::{emit_initialized, emit_pool_init, emit_add_liquidity, emit_remove_liquidity, emit_swap, emit_collect};
+use constants::{MAX_FEE_BPS, MIN_CREATOR_FEE_BPS, MAX_CREATOR_FEE_BPS};
+use error::ErrorMsg;
+use events::{emit_initialized, emit_pool_init, emit_add_liquidity, emit_remove_liquidity, emit_swap, emit_collect, emit_claim_creator_fees};
 use math::{get_amounts_for_liquidity, get_liquidity_for_amounts, snap_tick_to_spacing, MIN_LIQUIDITY, get_sqrt_ratio_at_tick};
 use position::{read_position, write_position, update_position, modify_position, calculate_pending_fees, has_liquidity};
 use storage::{
@@ -32,7 +32,7 @@ use storage::{
 };
 use swap::{engine_swap, validate_and_preview_swap};
 use tick::{get_fee_growth_inside, update_tick, is_valid_tick};
-use types::{PoolConfig, PoolState, PositionInfo, SwapResult, PreviewResult, TickInfo};
+use types::{PoolConfig, PoolState, PositionInfo, SwapResult, PreviewResult, TickInfo, CreatorFeesInfo};
 
 // Re-export for external use
 pub use storage::read_tick_info;
@@ -51,18 +51,28 @@ impl BelugaSwap {
     // ========================================================
 
     /// Initialize the pool with configuration
+    /// 
+    /// # Arguments
+    /// * `creator` - Address yang akan menerima creator fees
+    /// * `token_a` - Token pertama
+    /// * `token_b` - Token kedua
+    /// * `fee_bps` - LP fee dalam basis points (1-10000)
+    /// * `creator_fee_bps` - Creator fee dalam basis points (1-1000 = 0.01%-10% dari LP fee)
+    /// * `sqrt_price_x64` - Initial sqrt price
+    /// * `current_tick` - Initial tick
+    /// * `tick_spacing` - Tick spacing
     pub fn initialize(
         env: Env,
-        admin: Address,
+        creator: Address,
         token_a: Address,
         token_b: Address,
         fee_bps: u32,
-        protocol_fee_bps: u32,
+        creator_fee_bps: u32,
         sqrt_price_x64: u128,
         current_tick: i32,
         tick_spacing: i32,
     ) {
-        admin.require_auth();
+        creator.require_auth();
 
         if is_initialized(&env) {
             panic!("{}", ErrorMsg::ALREADY_INITIALIZED);
@@ -72,8 +82,8 @@ impl BelugaSwap {
             panic!("{}", ErrorMsg::INVALID_FEE);
         }
 
-        if protocol_fee_bps > MAX_PROTOCOL_FEE_BPS {
-            panic!("{}", ErrorMsg::INVALID_PROTOCOL_FEE);
+        if creator_fee_bps < MIN_CREATOR_FEE_BPS || creator_fee_bps > MAX_CREATOR_FEE_BPS {
+            panic!("{}", ErrorMsg::INVALID_CREATOR_FEE);
         }
 
         if tick_spacing <= 0 {
@@ -93,11 +103,11 @@ impl BelugaSwap {
         };
 
         let config = PoolConfig {
-            admin,
+            creator,
             token_a,
             token_b,
             fee_bps,
-            protocol_fee_bps,
+            creator_fee_bps,
         };
         write_pool_config(&env, &config);
 
@@ -105,7 +115,7 @@ impl BelugaSwap {
         set_initialized(&env);
 
         emit_pool_init(&env, sqrt_price_x64, current_tick, tick_spacing);
-        emit_initialized(&env, fee_bps, tick_spacing);
+        emit_initialized(&env, fee_bps, creator_fee_bps, tick_spacing);
     }
 
     // ========================================================
@@ -115,6 +125,11 @@ impl BelugaSwap {
     /// Get pool state
     pub fn get_pool_state(env: Env) -> PoolState {
         read_pool_state(&env)
+    }
+
+    /// Get pool config
+    pub fn get_pool_config(env: Env) -> PoolConfig {
+        read_pool_config(&env)
     }
 
     /// Get tick info
@@ -157,6 +172,15 @@ impl BelugaSwap {
             amount1,
             fees_owed_0: pos.tokens_owed_0.saturating_add(pending_0),
             fees_owed_1: pos.tokens_owed_1.saturating_add(pending_1),
+        }
+    }
+
+    /// Get creator fees info
+    pub fn get_creator_fees(env: Env) -> CreatorFeesInfo {
+        let pool = read_pool_state(&env);
+        CreatorFeesInfo {
+            fees_token0: pool.creator_fees_0,
+            fees_token1: pool.creator_fees_1,
         }
     }
 
@@ -212,21 +236,21 @@ impl BelugaSwap {
             return PreviewResult {
                 amount_in_used: 0, amount_out_expected: 0, fee_paid: 0,
                 price_impact_bps: 0, is_valid: false,
-                error_message: Some(ErrorSymbol::bad_token()),
+                error_message: Some(error::ErrorSymbol::bad_token()),
             };
         }
         if token_out != pool.token0 && token_out != pool.token1 {
             return PreviewResult {
                 amount_in_used: 0, amount_out_expected: 0, fee_paid: 0,
                 price_impact_bps: 0, is_valid: false,
-                error_message: Some(ErrorSymbol::bad_token()),
+                error_message: Some(error::ErrorSymbol::bad_token()),
             };
         }
         if token_in == token_out {
             return PreviewResult {
                 amount_in_used: 0, amount_out_expected: 0, fee_paid: 0,
                 price_impact_bps: 0, is_valid: false,
-                error_message: Some(ErrorSymbol::same_token()),
+                error_message: Some(error::ErrorSymbol::same_token()),
             };
         }
 
@@ -234,122 +258,113 @@ impl BelugaSwap {
         Self::preview_swap_advanced(env, amount_in, min_amount_out, zero_for_one, sqrt_price_limit_x64)
     }
 
-    /// Swap with manual direction control
+    /// Advanced swap with manual direction
     pub fn swap_advanced(
         env: Env,
         caller: Address,
-        amount_specified: i128,
+        amount_in: i128,
         min_amount_out: i128,
         zero_for_one: bool,
         sqrt_price_limit_x64: u128,
     ) -> SwapResult {
         caller.require_auth();
 
-        let config = read_pool_config(&env);
         let mut pool = read_pool_state(&env);
-
-        let fee_bps = config.fee_bps as i128;
-        let protocol_fee_bps = config.protocol_fee_bps as i128;
-
-        let validation = validate_and_preview_swap(
-            &env, &pool, amount_specified, min_amount_out,
-            zero_for_one, sqrt_price_limit_x64, fee_bps,
-        );
-
-        if let Err(e) = validation {
-            panic!("{}: {:?}", ErrorMsg::SWAP_VALIDATION_FAILED, e);
-        }
-
-        let (amount_in_total, amount_out_total) = engine_swap(
-            &env, &mut pool, amount_specified, zero_for_one,
-            sqrt_price_limit_x64, fee_bps, protocol_fee_bps,
-        );
-
-        write_pool_state(&env, &pool);
-
+        let config = read_pool_config(&env);
         let pool_addr = env.current_contract_address();
 
-        // Transfer tokens
-        if zero_for_one {
-            token::Client::new(&env, &pool.token0).transfer(&caller, &pool_addr, &amount_in_total);
-            token::Client::new(&env, &pool.token1).transfer(&pool_addr, &caller, &amount_out_total);
-        } else {
-            token::Client::new(&env, &pool.token1).transfer(&caller, &pool_addr, &amount_in_total);
-            token::Client::new(&env, &pool.token0).transfer(&pool_addr, &caller, &amount_out_total);
+        // Validate and preview swap
+        let validation_result = validate_and_preview_swap(
+            &env,
+            &pool,
+            amount_in,
+            min_amount_out,
+            zero_for_one,
+            sqrt_price_limit_x64,
+            config.fee_bps as i128,
+        );
+
+        if let Err(_) = validation_result {
+            panic!("{}", ErrorMsg::SWAP_VALIDATION_FAILED);
         }
 
-        emit_swap(&env, amount_in_total, amount_out_total, zero_for_one);
+        // Execute swap
+        let (amount_in_actual, amount_out_actual) = engine_swap(
+            &env,
+            &mut pool,
+            amount_in,
+            zero_for_one,
+            sqrt_price_limit_x64,
+            config.fee_bps as i128,
+            config.creator_fee_bps as i128,
+        );
+
+        // Save updated pool state
+        write_pool_state(&env, &pool);
+
+        // Transfer tokens
+        let (token_in, token_out) = if zero_for_one {
+            (&pool.token0, &pool.token1)
+        } else {
+            (&pool.token1, &pool.token0)
+        };
+
+        token::Client::new(&env, token_in).transfer(&caller, &pool_addr, &amount_in_actual);
+        token::Client::new(&env, token_out).transfer(&pool_addr, &caller, &amount_out_actual);
+
+        emit_swap(&env, amount_in_actual, amount_out_actual, zero_for_one);
 
         SwapResult {
-            amount_in: amount_in_total,
-            amount_out: amount_out_total,
+            amount_in: amount_in_actual,
+            amount_out: amount_out_actual,
             current_tick: pool.current_tick,
             sqrt_price_x64: pool.sqrt_price_x64,
         }
     }
 
-    /// Preview swap with manual direction control
+    /// Preview swap with manual direction
     pub fn preview_swap_advanced(
         env: Env,
-        amount_specified: i128,
+        amount_in: i128,
         min_amount_out: i128,
         zero_for_one: bool,
         sqrt_price_limit_x64: u128,
     ) -> PreviewResult {
-        let config = read_pool_config(&env);
         let pool = read_pool_state(&env);
-        let fee_bps = config.fee_bps as i128;
+        let config = read_pool_config(&env);
 
-        let validation = validate_and_preview_swap(
-            &env, &pool, amount_specified, min_amount_out,
-            zero_for_one, sqrt_price_limit_x64, fee_bps,
-        );
-
-        match validation {
-            Ok((amount_in_used, amount_out, fee_paid, final_price)) => {
-                // Calculate price impact
-                let price_impact = if amount_in_used > 0 && amount_out > 0 {
-                    let diff = if amount_in_used > amount_out {
-                        amount_in_used - amount_out
-                    } else {
-                        amount_out - amount_in_used
-                    };
-                    (diff * 10000) / amount_in_used
+        match validate_and_preview_swap(
+            &env,
+            &pool,
+            amount_in,
+            min_amount_out,
+            zero_for_one,
+            sqrt_price_limit_x64,
+            config.fee_bps as i128,
+        ) {
+            Ok((amount_in_used, amount_out, fee_paid, _final_price)) => {
+                let price_impact_bps = if amount_in > 0 {
+                    ((amount_in - amount_out) * 10000) / amount_in
                 } else {
                     0
                 };
-
-                // Price impact from sqrt_price change
-                let sqrt_price_before = pool.sqrt_price_x64;
-                let price_impact_from_sqrt = if sqrt_price_before > 0 {
-                    let ratio_bps = if final_price > sqrt_price_before {
-                        ((final_price - sqrt_price_before) * 10000) / sqrt_price_before
-                    } else {
-                        ((sqrt_price_before - final_price) * 10000) / sqrt_price_before
-                    };
-                    (ratio_bps * 2) as i128
-                } else {
-                    0
-                };
-
-                let final_price_impact = price_impact.max(price_impact_from_sqrt);
 
                 PreviewResult {
                     amount_in_used,
                     amount_out_expected: amount_out,
                     fee_paid,
-                    price_impact_bps: final_price_impact,
+                    price_impact_bps,
                     is_valid: true,
                     error_message: None,
                 }
             }
-            Err(e) => PreviewResult {
+            Err(error_symbol) => PreviewResult {
                 amount_in_used: 0,
                 amount_out_expected: 0,
                 fee_paid: 0,
                 price_impact_bps: 0,
                 is_valid: false,
-                error_message: Some(e),
+                error_message: Some(error_symbol),
             },
         }
     }
@@ -540,7 +555,7 @@ impl BelugaSwap {
     // FEE COLLECTION
     // ========================================================
 
-    /// Collect accumulated fees from a position
+    /// Collect accumulated fees from a position (untuk LP)
     pub fn collect(
         env: Env,
         owner: Address,
@@ -587,6 +602,48 @@ impl BelugaSwap {
         }
 
         emit_collect(&env, amount0_capped, amount1_capped);
+
+        (amount0_capped, amount1_capped)
+    }
+
+    /// Claim accumulated creator fees (hanya untuk pool creator)
+    pub fn claim_creator_fees(env: Env, claimer: Address) -> (u128, u128) {
+        claimer.require_auth();
+
+        let config = read_pool_config(&env);
+        let mut pool = read_pool_state(&env);
+        let pool_addr = env.current_contract_address();
+
+        // Verifikasi bahwa claimer adalah pool creator
+        if claimer != config.creator {
+            panic!("{}", ErrorMsg::UNAUTHORIZED);
+        }
+
+        let amount0 = pool.creator_fees_0;
+        let amount1 = pool.creator_fees_1;
+
+        // Cap fees to available balance
+        let pool_balance_0 = token::Client::new(&env, &pool.token0).balance(&pool_addr) as u128;
+        let pool_balance_1 = token::Client::new(&env, &pool.token1).balance(&pool_addr) as u128;
+
+        let amount0_capped = amount0.min(pool_balance_0);
+        let amount1_capped = amount1.min(pool_balance_1);
+
+        // Reset creator fees
+        pool.creator_fees_0 = pool.creator_fees_0.saturating_sub(amount0_capped);
+        pool.creator_fees_1 = pool.creator_fees_1.saturating_sub(amount1_capped);
+
+        write_pool_state(&env, &pool);
+
+        // Transfer creator fees
+        if amount0_capped > 0 {
+            token::Client::new(&env, &pool.token0).transfer(&pool_addr, &claimer, &(amount0_capped as i128));
+        }
+        if amount1_capped > 0 {
+            token::Client::new(&env, &pool.token1).transfer(&pool_addr, &claimer, &(amount1_capped as i128));
+        }
+
+        emit_claim_creator_fees(&env, amount0_capped, amount1_capped);
 
         (amount0_capped, amount1_capped)
     }

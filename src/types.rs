@@ -8,16 +8,16 @@ use soroban_sdk::{contracttype, Address, Symbol};
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct PoolConfig {
-    /// Admin address with special privileges
-    pub admin: Address,
+    /// Pool creator address (receives creator fees)
+    pub creator: Address,
     /// First token address (as provided by user)
     pub token_a: Address,
     /// Second token address (as provided by user)
     pub token_b: Address,
     /// Swap fee in basis points (e.g., 30 = 0.30%)
     pub fee_bps: u32,
-    /// Protocol fee in basis points (percentage of LP fees)
-    pub protocol_fee_bps: u32,
+    /// Creator fee in basis points (1-1000 bps = 0.01%-10% of swap amount)
+    pub creator_fee_bps: u32,
 }
 
 // ============================================================
@@ -44,10 +44,10 @@ pub struct PoolState {
     pub fee_growth_global_0: u128,
     /// Global fee growth for token1 (Q64.64 format)
     pub fee_growth_global_1: u128,
-    /// Accumulated protocol fees for token0
-    pub protocol_fees_0: u128,
-    /// Accumulated protocol fees for token1
-    pub protocol_fees_1: u128,
+    /// Accumulated creator fees for token0
+    pub creator_fees_0: u128,
+    /// Accumulated creator fees for token1
+    pub creator_fees_1: u128,
 }
 
 // ============================================================
@@ -141,6 +141,16 @@ pub struct PreviewResult {
     pub is_valid: bool,
     /// Error message if invalid
     pub error_message: Option<Symbol>,
+}
+
+/// Creator fees info
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct CreatorFeesInfo {
+    /// Accumulated creator fees for token0
+    pub fees_token0: u128,
+    /// Accumulated creator fees for token1
+    pub fees_token1: u128,
 }
 
 // ============================================================

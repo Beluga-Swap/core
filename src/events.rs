@@ -35,6 +35,10 @@ impl EventName {
     pub fn sync_tick(env: &Env) -> Symbol {
         Symbol::new(env, "synctk")
     }
+    
+    pub fn claim_creator_fees(env: &Env) -> Symbol {
+        Symbol::new(env, "claim_cr")
+    }
 }
 
 // ============================================================
@@ -42,10 +46,10 @@ impl EventName {
 // ============================================================
 
 /// Emit pool initialized event
-pub fn emit_initialized(env: &Env, fee_bps: u32, tick_spacing: i32) {
+pub fn emit_initialized(env: &Env, fee_bps: u32, creator_fee_bps: u32, tick_spacing: i32) {
     env.events().publish(
         (EventName::initialized(env),),
-        (fee_bps, tick_spacing),
+        (fee_bps, creator_fee_bps, tick_spacing),
     );
 }
 
@@ -94,5 +98,13 @@ pub fn emit_sync_tick(env: &Env, tick: i32, sqrt_price_x64: u128) {
     env.events().publish(
         (EventName::sync_tick(env),),
         (tick, sqrt_price_x64),
+    );
+}
+
+/// Emit claim creator fees event
+pub fn emit_claim_creator_fees(env: &Env, amount0: u128, amount1: u128) {
+    env.events().publish(
+        (EventName::claim_creator_fees(env),),
+        (amount0, amount1),
     );
 }

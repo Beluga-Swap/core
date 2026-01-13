@@ -54,7 +54,7 @@ pub struct ErrorMsg;
 impl ErrorMsg {
     pub const ALREADY_INITIALIZED: &'static str = "pool already initialized";
     pub const INVALID_FEE: &'static str = "invalid fee: must be 1-10000 bps";
-    pub const INVALID_PROTOCOL_FEE: &'static str = "invalid protocol fee: must be 0-10000 bps";
+    pub const INVALID_CREATOR_FEE: &'static str = "invalid creator fee: must be 1-1000 bps";
     pub const INVALID_TICK_SPACING: &'static str = "invalid tick spacing: must be positive";
     pub const INVALID_TICK_RANGE: &'static str = "invalid tick range: lower must be < upper";
     pub const INVALID_TOKEN: &'static str = "invalid token for this pool";
@@ -64,4 +64,5 @@ impl ErrorMsg {
     pub const INSUFFICIENT_LIQUIDITY: &'static str = "insufficient liquidity in position";
     pub const INVALID_LIQUIDITY_AMOUNT: &'static str = "liquidity amount must be positive";
     pub const SWAP_VALIDATION_FAILED: &'static str = "swap validation failed";
+    pub const UNAUTHORIZED: &'static str = "unauthorized: only pool creator can perform this action";
 }

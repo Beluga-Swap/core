@@ -93,8 +93,8 @@ pub fn init_pool_state(
         token1,
         fee_growth_global_0: 0,
         fee_growth_global_1: 0,
-        protocol_fees_0: 0,
-        protocol_fees_1: 0,
+        creator_fees_0: 0,
+        creator_fees_1: 0,
     };
     
     write_pool_state(env, &state);

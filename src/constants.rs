@@ -64,16 +64,19 @@ pub const MAX_TICK_SEARCH_STEPS: i32 = 2000;
 /// Maximum fee in basis points (100%)
 pub const MAX_FEE_BPS: u32 = 10000;
 
-/// Maximum protocol fee in basis points (100% of LP fees)
-pub const MAX_PROTOCOL_FEE_BPS: u32 = 10000;
+/// Minimum creator fee in basis points (0.01%)
+pub const MIN_CREATOR_FEE_BPS: u32 = 1;
+
+/// Maximum creator fee in basis points (10% of swap)
+pub const MAX_CREATOR_FEE_BPS: u32 = 1000;
 
 /// Default fee (0.3%)
 #[allow(dead_code)]
 pub const DEFAULT_FEE_BPS: u32 = 30;
 
-/// Default protocol fee (10% of LP fees)
+/// Default creator fee (1% of swap = 100 bps)
 #[allow(dead_code)]
-pub const DEFAULT_PROTOCOL_FEE_BPS: u32 = 10;
+pub const DEFAULT_CREATOR_FEE_BPS: u32 = 100;
 
 // ============================================================
 // MATH CONSTANTS

@@ -23,7 +23,7 @@ use crate::types::PoolState;
 /// * `zero_for_one` - Direction (true = token0 -> token1)
 /// * `sqrt_price_limit_x64` - Price limit (0 for no limit)
 /// * `fee_bps` - Fee in basis points
-/// * `protocol_fee_bps` - Protocol fee in basis points
+/// * `creator_fee_bps` - Creator fee in basis points (1-1000 bps = 0.01%-10% dari fee LP)
 /// 
 /// # Returns
 /// (amount_in, amount_out)
@@ -37,7 +37,7 @@ pub fn engine_swap(
     zero_for_one: bool,
     sqrt_price_limit_x64: u128,
     fee_bps: i128,
-    protocol_fee_bps: i128,
+    creator_fee_bps: i128,
 ) -> (i128, i128) {
     if amount_specified < MIN_SWAP_AMOUNT {
         panic!("swap amount too small");
@@ -58,7 +58,7 @@ pub fn engine_swap(
         zero_for_one,
         sqrt_price_limit_x64,
         fee_bps,
-        protocol_fee_bps,
+        creator_fee_bps,
         true,   // allow_panic
         false,  // dry_run = false, actually modify state
     )
@@ -90,7 +90,7 @@ pub fn quote_swap(
         zero_for_one,
         sqrt_price_limit_x64,
         fee_bps,
-        0, // No protocol fee for quotes
+        0, // No creator fee for quotes
     );
 
     (amount_in_used, amount_out, sim_pool.sqrt_price_x64)
@@ -171,7 +171,7 @@ fn engine_swap_safe(
     zero_for_one: bool,
     sqrt_price_limit_x64: u128,
     fee_bps: i128,
-    protocol_fee_bps: i128,
+    creator_fee_bps: i128,
 ) -> (i128, i128) {
     if amount_specified < MIN_SWAP_AMOUNT || amount_specified <= 0 {
         return (0, 0);
@@ -188,13 +188,16 @@ fn engine_swap_safe(
         zero_for_one,
         sqrt_price_limit_x64,
         fee_bps,
-        protocol_fee_bps,
+        creator_fee_bps,
         false, // allow_panic
         true,  // dry_run - DON'T modify tick state!
     )
 }
 
 /// Core swap logic following Uniswap V3 pattern
+/// 
+/// Creator fee diambil dari fee LP (bukan dari total swap amount)
+/// Formula: creator_fee = (lp_fee * creator_fee_bps) / 10000
 /// 
 /// # Arguments
 /// * `dry_run` - If true, tick storage is NOT modified (for quotes)
@@ -205,14 +208,14 @@ fn engine_swap_internal(
     zero_for_one: bool,
     sqrt_price_limit_x64: u128,
     fee_bps: i128,
-    protocol_fee_bps: i128,
+    creator_fee_bps: i128,
     allow_panic: bool,
     dry_run: bool,
 ) -> (i128, i128) {
     // Initialize swap state
     let mut amount_remaining = amount_specified;
     let mut amount_out_total: i128 = 0;
-    let mut total_protocol_fee: i128 = 0;
+    let mut total_creator_fee: i128 = 0;
 
     let mut sqrt_price = pool.sqrt_price_x64;
     let mut liquidity = pool.liquidity;
@@ -310,7 +313,7 @@ fn engine_swap_internal(
             break;
         }
 
-        // Calculate step fee
+        // Calculate step fee (total fee from swap)
         let step_fee = calculate_step_fee(amount_in, amount_remaining, amount_available, fee_bps, fee_divisor);
 
         // Validate fee
@@ -322,23 +325,26 @@ fn engine_swap_internal(
             }
         }
 
-        // Calculate protocol fee
-        let protocol_fee = if protocol_fee_bps > 0 && step_fee > 0 {
-            step_fee.saturating_mul(protocol_fee_bps).saturating_div(10000)
+        // Calculate creator fee (percentage dari LP fee)
+        // Creator fee = (step_fee * creator_fee_bps) / 10000
+        let creator_fee = if creator_fee_bps > 0 && step_fee > 0 {
+            step_fee.saturating_mul(creator_fee_bps).saturating_div(10000)
         } else {
             0
         };
 
-        let lp_fee = step_fee.saturating_sub(protocol_fee);
+        // LP fee = total fee - creator fee
+        let lp_fee = step_fee.saturating_sub(creator_fee);
 
         // Update amounts
         amount_remaining = amount_remaining
             .saturating_sub(amount_in)
             .saturating_sub(step_fee);
         amount_out_total = amount_out_total.saturating_add(amount_out);
-        total_protocol_fee = total_protocol_fee.saturating_add(protocol_fee);
+        total_creator_fee = total_creator_fee.saturating_add(creator_fee);
 
-        // Update fee growth global (Uniswap V3 style)
+        // Update fee growth global untuk LP (Uniswap V3 style)
+        // Hanya LP fee yang masuk ke fee_growth_global (creator fee tidak)
         if liquidity > 0 && lp_fee > 0 {
             let fee_u = lp_fee as u128;
             let liq_u = liquidity as u128;
@@ -421,12 +427,12 @@ fn engine_swap_internal(
     pool.liquidity = liquidity;
     pool.current_tick = current_tick;
 
-    // Accumulate protocol fees
-    if total_protocol_fee > 0 {
+    // Accumulate creator fees
+    if total_creator_fee > 0 {
         if zero_for_one {
-            pool.protocol_fees_0 = pool.protocol_fees_0.saturating_add(total_protocol_fee as u128);
+            pool.creator_fees_0 = pool.creator_fees_0.saturating_add(total_creator_fee as u128);
         } else {
-            pool.protocol_fees_1 = pool.protocol_fees_1.saturating_add(total_protocol_fee as u128);
+            pool.creator_fees_1 = pool.creator_fees_1.saturating_add(total_creator_fee as u128);
         }
     }
 

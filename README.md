@@ -1,305 +1,297 @@
-# BelugaSwap
+# 🐋 BelugaSwap
 
-A Uniswap V3-style Automated Market Maker (AMM) with concentrated liquidity, built on Stellar/Soroban.
+**A Concentrated Liquidity AMM for Soroban (Stellar)**
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Stellar](https://img.shields.io/badge/Stellar-Soroban-brightgreen)](https://stellar.org)
+BelugaSwap is a next-generation decentralized exchange built on the Stellar network using Soroban smart contracts. Inspired by Uniswap V3, it implements concentrated liquidity to maximize capital efficiency for liquidity providers.
 
-## Overview
+---
 
-BelugaSwap brings concentrated liquidity to the Stellar ecosystem. Unlike traditional AMMs that spread liquidity across the entire price curve (0 to ∞), BelugaSwap allows liquidity providers to concentrate their capital within specific price ranges, resulting in significantly higher capital efficiency.
+## ✨ Key Features
 
-### Key Features
+### 1. Concentrated Liquidity — Capital Efficient
+Unlike traditional AMMs that spread liquidity across the entire price curve (0 to ∞), BelugaSwap allows LPs to concentrate their capital within specific price ranges. This means:
 
-- **Concentrated Liquidity** - Up to 4000x more capital efficient than traditional AMMs
-- **Custom Price Ranges** - LPs choose exactly where to deploy their liquidity
-- **Tick-based Architecture** - Efficient price discovery following Uniswap V3 design
-- **Automatic Fee Accumulation** - Fees accumulate per position and can be collected anytime
-- **Multi-tick Swaps** - Seamless swaps across multiple price ranges
-- **Configurable Fees** - Flexible swap fee and protocol fee settings
+- **Up to 4000x more capital efficiency** compared to traditional AMMs
+- Earn more fees with less capital
+- Better rates for traders due to deeper liquidity at active price ranges
 
-## Architecture
+### 2. Custom Price Ranges — Tick Architecture
+Liquidity Providers have full control over where they deploy their liquidity:
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         BelugaSwap                               │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐              │
-│  │   lib.rs    │  │  swap.rs    │  │  pool.rs    │              │
-│  │             │  │             │  │             │              │
-│  │ - initialize│  │ - swap      │  │ - PoolState │              │
-│  │ - add_liq   │  │ - quote     │  │ - PoolConfig│              │
-│  │ - remove_liq│  │ - validate  │  │ - read/write│              │
-│  │ - collect   │  │             │  │             │              │
-│  │ - swap      │  │             │  │             │              │
-│  └─────────────┘  └─────────────┘  └─────────────┘              │
-│         │               │               │                        │
-│         └───────────────┼───────────────┘                        │
-│                         │                                        │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐              │
-│  │  tick.rs    │  │ position.rs │  │  math.rs    │              │
-│  │             │  │             │  │             │              │
-│  │ - TickInfo  │  │ - Position  │  │ - sqrt_price│              │
-│  │ - cross_tick│  │ - update    │  │ - liquidity │              │
-│  │ - fee_growth│  │ - fees calc │  │ - amounts   │              │
-│  │   inside    │  │             │  │ - Q64.64    │              │
-│  └─────────────┘  └─────────────┘  └─────────────┘              │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+- Set exact lower and upper price boundaries using tick system
+- Position liquidity precisely where trading activity occurs
+- Multiple positions at different ranges for advanced strategies
+- Tick spacing configuration for different pool types
 
-┌─────────────────────────────────────────────────────────────────┐
-│                        Data Flow                                 │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  User                                                            │
-│    │                                                             │
-│    ▼                                                             │
-│  ┌──────────┐    ┌──────────┐    ┌──────────┐                   │
-│  │   Swap   │───▶│  Tick    │───▶│ Position │                   │
-│  │  Engine  │    │ Crossing │    │  Update  │                   │
-│  └──────────┘    └──────────┘    └──────────┘                   │
-│       │               │               │                          │
-│       ▼               ▼               ▼                          │
-│  ┌──────────┐    ┌──────────┐    ┌──────────┐                   │
-│  │  Price   │    │ Liquidity│    │   Fee    │                   │
-│  │  Update  │    │  Update  │    │ Accrual  │                   │
-│  └──────────┘    └──────────┘    └──────────┘                   │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
+### 3. Creator Fee — Earn Revenue from Your Pool
+Deploy a new trading pair and earn passive income from every swap:
 
-### Core Components
+- **Pool creators receive a percentage of LP fees** (configurable 0.01% - 10%)
+- Example: Create an AQUA/USDC pool → every time users swap, you earn revenue from LP fees
+- Claim accumulated fees anytime
 
-| Module | Description |
-|--------|-------------|
-| `lib.rs` | Main contract entry points and orchestration |
-| `swap.rs` | Swap execution engine with cross-tick support |
-| `pool.rs` | Pool state and configuration management |
-| `tick.rs` | Tick data structures and crossing logic |
-| `position.rs` | LP position management and fee tracking |
-| `math.rs` | Fixed-point math operations (Q64.64 format) |
-| `twap.rs` | Time-weighted average price oracle (optional) |
+### 4. Configurable Fees — Flexible Pool Parameters
+Customize pool fees based on asset characteristics:
 
-### How Concentrated Liquidity Works
+| Pool Type | Recommended Fee | Use Case |
+|-----------|-----------------|----------|
+| Stablecoin-Stablecoin | 0.01%, 0.05%, 0.1% | USDC/EURC pairs |
+| Stable-Volatile | 0.30%, 0.5%, 1% | XLM/USDC pairs |
+
+### 5. Multi-hop Routing *(Coming Soon)*
+Swap between any tokens seamlessly:
+
+- Automatic route finding: A → B → C
+- Gas-optimized multi-step swaps
+- Best price discovery across multiple pools
+
+---
+
+## 🏗️ Architecture
+
+### Module Structure
 
 ```
-Traditional AMM (xy=k):
-Liquidity spread from price 0 to ∞
-
-Price:  0 ──────────────────────────────────────────▶ ∞
-        ████████████████████████████████████████████
-        └─────────────── Liquidity ─────────────────┘
-
-
-BelugaSwap (Concentrated):
-Liquidity concentrated in chosen price ranges
-
-Price:  0 ────────────[=====]──────[========]───────▶ ∞
-                      Position A    Position B
-                      (tight)       (wide)
-
-Result: Same capital, much deeper liquidity where it matters
+belugaswap/
+├── lib.rs          # Contract entry point & public functions
+├── constants.rs    # Protocol constants (fees, ticks, limits)
+├── error.rs        # Error definitions
+├── events.rs       # On-chain event emissions
+├── math.rs         # Q64.64 fixed-point arithmetic
+├── position.rs     # LP position management
+├── storage.rs      # Persistent storage handlers
+├── swap.rs         # Swap execution engine
+├── tick.rs         # Tick management & traversal
+└── types.rs        # Data structures & types
 ```
 
-## Prerequisites
+## 📦 Installation
 
-### System Requirements
+### Prerequisites
 
-- **Rust** >= 1.74.0
-- **Soroban CLI** >= 23.0.0
-- **wasm32-unknown-unknown** target
+- [Rust](https://rustup.rs/) (1.70+)
+- [Soroban CLI](https://soroban.stellar.org/docs/getting-started/setup)
+- [Stellar CLI](https://github.com/stellar/stellar-cli)
 
-### Installation
+### Setup
 
-1. **Install Rust**
+1. **Clone the repository**
    ```bash
-   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+   git clone https://github.com/your-org/belugaswap.git
+   cd belugaswap
    ```
 
-2. **Add WASM target**
+2. **Install Soroban toolchain**
    ```bash
    rustup target add wasm32-unknown-unknown
+   cargo install --locked soroban-cli
    ```
 
-3. **Install Soroban CLI**
+3. **Build the contract**
    ```bash
-   cargo install --locked stellar-cli --features opt
+   cargo build --target wasm32-unknown-unknown --release
    ```
 
-4. **Configure Network**
+4. **Optimize WASM (optional but recommended)**
    ```bash
-   stellar network add testnet \
-     --rpc-url https://soroban-testnet.stellar.org:443 \
-     --network-passphrase "Test SDF Network ; September 2015"
+   soroban contract optimize \
+     --wasm target/wasm32-unknown-unknown/release/belugaswap.wasm
    ```
 
-5. **Create Test Accounts**
-   ```bash
-   stellar keys generate alice --network testnet
-   stellar keys generate bob --network testnet
-   ```
+---
 
-## Quick Start
+## 🚀 Deployment
 
-### Build
+### 1. Configure Network
 
+**Testnet:**
 ```bash
-cargo build --target wasm32-unknown-unknown --release
+soroban network add --global testnet \
+  --rpc-url https://soroban-testnet.stellar.org:443 \
+  --network-passphrase "Test SDF Network ; September 2015"
 ```
 
-### Deploy
+**Mainnet:**
+```bash
+soroban network add --global mainnet \
+  --rpc-url https://soroban.stellar.org:443 \
+  --network-passphrase "Public Global Stellar Network ; September 2015"
+```
+
+### 2. Create Identity
 
 ```bash
-stellar contract deploy \
+soroban keys generate --global deployer --network testnet
+soroban keys address deployer
+```
+
+Fund your testnet account at [Stellar Laboratory](https://laboratory.stellar.org/#account-creator?network=test).
+
+### 3. Deploy Contract
+
+```bash
+soroban contract deploy \
   --wasm target/wasm32-unknown-unknown/release/belugaswap.wasm \
-  --source alice \
+  --source deployer \
   --network testnet
 ```
 
-### Initialize Pool
+Save the returned contract ID.
+
+### 4. Initialize Pool
 
 ```bash
-stellar contract invoke --id <CONTRACT_ID> --source alice --network testnet -- \
+soroban contract invoke \
+  --id <CONTRACT_ID> \
+  --source deployer \
+  --network testnet \
+  -- \
   initialize \
-  --admin alice \
+  --creator <CREATOR_ADDRESS> \
   --token_a <TOKEN_A_ADDRESS> \
   --token_b <TOKEN_B_ADDRESS> \
   --fee_bps 30 \
-  --protocol_fee_bps 10 \
+  --creator_fee_bps 100 \
   --sqrt_price_x64 18446744073709551616 \
   --current_tick 0 \
   --tick_spacing 60
 ```
 
+**Parameters explained:**
+- `fee_bps`: LP fee in basis points (30 = 0.30%)
+- `creator_fee_bps`: Creator's share of LP fees (100 = 1% of LP fees)
+- `sqrt_price_x64`: Initial price (18446744073709551616 = 1:1 ratio)
+- `tick_spacing`: Tick granularity (60 for 0.30% fee pools)
+
+---
+
+## 📖 Usage Examples
+
 ### Add Liquidity
 
 ```bash
-stellar contract invoke --id <CONTRACT_ID> --source alice --network testnet -- \
+soroban contract invoke \
+  --id <CONTRACT_ID> \
+  --source lp_wallet \
+  --network testnet \
+  -- \
   add_liquidity \
-  --owner alice \
-  --token_a <TOKEN_A> \
-  --token_b <TOKEN_B> \
-  --amount_a_desired 10000000 \
-  --amount_b_desired 10000000 \
-  --amount_a_min 0 \
-  --amount_b_min 0 \
-  --lower_tick -60 \
-  --upper_tick 60
+  --owner <LP_ADDRESS> \
+  --lower_tick -1000 \
+  --upper_tick 1000 \
+  --amount0_desired 1000000000 \
+  --amount1_desired 1000000000 \
+  --amount0_min 990000000 \
+  --amount1_min 990000000
 ```
 
-### Swap
+### Swap Tokens
 
 ```bash
-stellar contract invoke --id <CONTRACT_ID> --source bob --network testnet -- \
+soroban contract invoke \
+  --id <CONTRACT_ID> \
+  --source trader \
+  --network testnet \
+  -- \
   swap \
-  --caller bob \
-  --token_in <TOKEN_IN> \
-  --token_out <TOKEN_OUT> \
-  --amount_in 1000000 \
-  --min_amount_out 900000 \
+  --caller <TRADER_ADDRESS> \
+  --token_in <TOKEN_A_ADDRESS> \
+  --token_out <TOKEN_B_ADDRESS> \
+  --amount_in 100000000 \
+  --min_amount_out 99000000 \
   --sqrt_price_limit_x64 0
 ```
 
-## API Reference
-
-### Core Functions
-
-| Function | Description |
-|----------|-------------|
-| `initialize` | Initialize a new liquidity pool |
-| `add_liquidity` | Add liquidity to a price range |
-| `remove_liquidity` | Remove liquidity from a position |
-| `swap` | Execute a token swap |
-| `preview_swap` | Simulate a swap (read-only) |
-| `collect` | Collect accumulated fees |
-
-### View Functions
-
-| Function | Description |
-|----------|-------------|
-| `get_pool_state` | Get current pool state |
-| `get_position` | Get position details |
-| `get_tick_info` | Get tick data |
-| `get_swap_direction` | Determine swap direction |
-
-## Error Codes
-
-| Code | Name | Description |
-|------|------|-------------|
-| `AMT_LOW` | Amount Too Low | Input amount below minimum threshold |
-| `NO_LIQ` | No Liquidity | No liquidity available for swap |
-| `SLIP_HI` | Slippage High | Output less than minimum specified |
-| `OUT_DUST` | Output Dust | Output amount too small |
-| `SLIP_MAX` | Max Slippage | Exceeds maximum allowed slippage |
-
-## Technical Specifications
-
-### Price Representation
-
-- **Format**: Q64.64 fixed-point
-- **sqrt_price**: `sqrt(price) * 2^64`
-- **1:1 price**: `sqrt_price_x64 = 18446744073709551616` (2^64)
-
-### Tick System
-
-- **Tick Range**: -887,272 to +887,272
-- **Price Formula**: `price = 1.0001^tick`
-- **Each Tick**: ~0.01% price change
-
-### Fee Structure
-
-- **fee_bps**: Total swap fee (e.g., 30 = 0.30%)
-- **protocol_fee_bps**: Protocol's share of fees (e.g., 10 = 10% of fees)
-
-## Testing
+### Collect LP Fees
 
 ```bash
-# Run unit tests
-cargo test
-
-# Run with verbose output
-cargo test -- --nocapture
+soroban contract invoke \
+  --id <CONTRACT_ID> \
+  --source lp_wallet \
+  --network testnet \
+  -- \
+  collect \
+  --owner <LP_ADDRESS> \
+  --lower_tick -1000 \
+  --upper_tick 1000
 ```
 
-## Project Structure
+### Claim Creator Fees
 
-```
-belugaswap/
-├── Cargo.toml
-├── src/
-│   ├── lib.rs          # Contract entry points
-│   ├── math.rs         # Mathematical operations
-│   ├── pool.rs         # Pool state management
-│   ├── position.rs     # Position management
-│   ├── swap.rs         # Swap engine
-│   ├── tick.rs         # Tick management
-│   └── twap.rs         # TWAP oracle
-└── README.md
+```bash
+soroban contract invoke \
+  --id <CONTRACT_ID> \
+  --source creator_wallet \
+  --network testnet \
+  -- \
+  claim_creator_fees \
+  --claimer <CREATOR_ADDRESS>
 ```
 
-## Security
+### Query Functions
 
-This software is provided as-is. While we strive for correctness, smart contracts carry inherent risks. Please review the code and use at your own risk.
+```bash
+# Get pool state
+soroban contract invoke --id <CONTRACT_ID> --network testnet -- get_pool_state
 
-For security concerns, please open an issue or contact the maintainers directly.
+# Get position info
+soroban contract invoke --id <CONTRACT_ID> --network testnet -- \
+  get_position --owner <ADDRESS> --lower -1000 --upper 1000
 
-## License
-
-```
-Copyright 2024 BelugaSwap Contributors
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+# Preview swap
+soroban contract invoke --id <CONTRACT_ID> --network testnet -- \
+  preview_swap \
+  --token_in <TOKEN_A> \
+  --token_out <TOKEN_B> \
+  --amount_in 1000000 \
+  --min_amount_out 0 \
+  --sqrt_price_limit_x64 0
 ```
 
 ---
+
+## 📊 Contract Functions
+
+### Initialization
+| Function | Description |
+|----------|-------------|
+| `initialize` | Initialize pool with tokens, fees, and initial price |
+
+### Swap Functions
+| Function | Description |
+|----------|-------------|
+| `swap` | Execute token swap with auto direction detection |
+| `swap_advanced` | Execute swap with explicit direction |
+| `preview_swap` | Simulate swap without execution |
+
+### Liquidity Functions
+| Function | Description |
+|----------|-------------|
+| `add_liquidity` | Add liquidity to a price range |
+| `remove_liquidity` | Remove liquidity from a position |
+
+### Fee Collection
+| Function | Description |
+|----------|-------------|
+| `collect` | Collect LP fees from a position |
+| `claim_creator_fees` | Claim accumulated creator fees |
+
+### View Functions
+| Function | Description |
+|----------|-------------|
+| `get_pool_state` | Get current pool state |
+| `get_pool_config` | Get pool configuration |
+| `get_position` | Get position with pending fees |
+| `get_tick_info` | Get tick data |
+| `get_creator_fees` | Get accumulated creator fees |
+| `get_swap_direction` | Get swap direction for a token |
+
+---
+
+## 📄 License
+
+see [LICENSE](LICENSE) for details.
+
+---
+
+*Built with ❤️ on Stellar/Soroban*

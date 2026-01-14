@@ -1,13 +1,20 @@
+// Compatible with OpenZeppelin Stellar Soroban Contracts patterns
+//
+// Swap engine module following OpenZeppelin conventions:
+// - Clear function documentation
+// - Consistent error handling
+// - Separation of concerns
+
 use soroban_sdk::{Env, Symbol};
 
 use crate::constants::{
-    MIN_SWAP_AMOUNT, MIN_OUTPUT_AMOUNT, MAX_SLIPPAGE_BPS, MAX_SWAP_ITERATIONS,
+    MAX_SLIPPAGE_BPS, MAX_SWAP_ITERATIONS, MIN_OUTPUT_AMOUNT, MIN_SWAP_AMOUNT,
 };
 use crate::error::ErrorSymbol;
 use crate::events::emit_sync_tick;
-use crate::math::{compute_swap_step_with_target, get_sqrt_ratio_at_tick, div_q64};
+use crate::math::{compute_swap_step_with_target, div_q64, get_sqrt_ratio_at_tick};
 use crate::storage::read_tick_info;
-use crate::tick::{find_next_initialized_tick, cross_tick};
+use crate::tick::{cross_tick, find_next_initialized_tick};
 use crate::types::PoolState;
 
 // ============================================================
@@ -15,7 +22,7 @@ use crate::types::PoolState;
 // ============================================================
 
 /// Execute a swap (modifies state)
-/// 
+///
 /// # Arguments
 /// * `env` - Soroban environment
 /// * `pool` - Mutable pool state
@@ -23,11 +30,11 @@ use crate::types::PoolState;
 /// * `zero_for_one` - Direction (true = token0 -> token1)
 /// * `sqrt_price_limit_x64` - Price limit (0 for no limit)
 /// * `fee_bps` - Fee in basis points
-/// * `creator_fee_bps` - Creator fee in basis points (1-1000 bps = 0.01%-10% dari fee LP)
-/// 
+/// * `creator_fee_bps` - Creator fee in basis points (1-1000 bps)
+///
 /// # Returns
-/// (amount_in, amount_out)
-/// 
+/// `(amount_in, amount_out)`
+///
 /// # Panics
 /// If swap amount is too small or no liquidity available
 pub fn engine_swap(
@@ -39,6 +46,7 @@ pub fn engine_swap(
     fee_bps: i128,
     creator_fee_bps: i128,
 ) -> (i128, i128) {
+    // Validate input
     if amount_specified < MIN_SWAP_AMOUNT {
         panic!("swap amount too small");
     }
@@ -59,15 +67,15 @@ pub fn engine_swap(
         sqrt_price_limit_x64,
         fee_bps,
         creator_fee_bps,
-        true,   // allow_panic
-        false,  // dry_run = false, actually modify state
+        true,  // allow_panic
+        false, // dry_run = false, actually modify state
     )
 }
 
 /// Quote a swap without executing it
-/// 
+///
 /// # Returns
-/// (amount_in_used, amount_out, final_sqrt_price)
+/// `(amount_in_used, amount_out, final_sqrt_price)`
 pub fn quote_swap(
     env: &Env,
     pool: &PoolState,
@@ -97,9 +105,9 @@ pub fn quote_swap(
 }
 
 /// Validate and preview a swap
-/// 
+///
 /// # Returns
-/// Ok((amount_in_used, amount_out, fee_paid, final_price)) or Err(Symbol)
+/// `Ok((amount_in_used, amount_out, fee_paid, final_price))` or `Err(Symbol)`
 pub fn validate_and_preview_swap(
     env: &Env,
     pool: &PoolState,
@@ -120,14 +128,8 @@ pub fn validate_and_preview_swap(
     }
 
     // Get quote
-    let (amount_in_used, amount_out, final_price) = quote_swap(
-        env,
-        pool,
-        amount_in,
-        zero_for_one,
-        sqrt_price_limit_x64,
-        fee_bps,
-    );
+    let (amount_in_used, amount_out, final_price) =
+        quote_swap(env, pool, amount_in, zero_for_one, sqrt_price_limit_x64, fee_bps);
 
     // Check slippage
     if amount_out < min_amount_out {
@@ -195,10 +197,10 @@ fn engine_swap_safe(
 }
 
 /// Core swap logic following Uniswap V3 pattern
-/// 
-/// Creator fee diambil dari fee LP (bukan dari total swap amount)
+///
+/// Creator fee is taken from LP fee (not from total swap amount)
 /// Formula: creator_fee = (lp_fee * creator_fee_bps) / 10000
-/// 
+///
 /// # Arguments
 /// * `dry_run` - If true, tick storage is NOT modified (for quotes)
 fn engine_swap_internal(
@@ -256,12 +258,8 @@ fn engine_swap_internal(
         }
 
         // Find next initialized tick
-        let next_tick = find_next_initialized_tick(
-            env,
-            current_tick,
-            pool.tick_spacing,
-            zero_for_one,
-        );
+        let next_tick =
+            find_next_initialized_tick(env, current_tick, pool.tick_spacing, zero_for_one);
 
         // Get sqrt price at next tick
         let mut sqrt_target = get_sqrt_ratio_at_tick(next_tick);
@@ -313,8 +311,9 @@ fn engine_swap_internal(
             break;
         }
 
-        // Calculate step fee (total fee from swap)
-        let step_fee = calculate_step_fee(amount_in, amount_remaining, amount_available, fee_bps, fee_divisor);
+        // Calculate step fee
+        let step_fee =
+            calculate_step_fee(amount_in, amount_remaining, amount_available, fee_bps, fee_divisor);
 
         // Validate fee
         if step_fee < 0 || step_fee > amount_in {
@@ -325,10 +324,11 @@ fn engine_swap_internal(
             }
         }
 
-        // Calculate creator fee (percentage dari LP fee)
-        // Creator fee = (step_fee * creator_fee_bps) / 10000
+        // Calculate creator fee (percentage of LP fee)
         let creator_fee = if creator_fee_bps > 0 && step_fee > 0 {
-            step_fee.saturating_mul(creator_fee_bps).saturating_div(10000)
+            step_fee
+                .saturating_mul(creator_fee_bps)
+                .saturating_div(10000)
         } else {
             0
         };
@@ -343,8 +343,7 @@ fn engine_swap_internal(
         amount_out_total = amount_out_total.saturating_add(amount_out);
         total_creator_fee = total_creator_fee.saturating_add(creator_fee);
 
-        // Update fee growth global untuk LP (Uniswap V3 style)
-        // Hanya LP fee yang masuk ke fee_growth_global (creator fee tidak)
+        // Update fee growth global for LP (Uniswap V3 style)
         if liquidity > 0 && lp_fee > 0 {
             let fee_u = lp_fee as u128;
             let liq_u = liquidity as u128;
@@ -367,16 +366,13 @@ fn engine_swap_internal(
         let at_user_limit = sqrt_price_limit_x64 != 0 && sqrt_target == sqrt_limit;
 
         if target_reached && should_cross && !at_user_limit {
-            // Update price first
             sqrt_price = sqrt_target;
 
-            // Cross tick - but only modify storage if NOT dry_run
+            // Cross tick - only modify storage if NOT dry_run
             let liquidity_net = if dry_run {
-                // For dry run (quotes), just read the liquidity_net without modifying storage
                 let tick_info = read_tick_info(env, next_tick);
                 tick_info.liquidity_net
             } else {
-                // Actually cross the tick and modify storage
                 cross_tick(
                     env,
                     next_tick,
@@ -387,10 +383,8 @@ fn engine_swap_internal(
 
             // Update liquidity based on direction
             if zero_for_one {
-                // Moving left (price decreasing)
                 liquidity = liquidity.saturating_sub(liquidity_net);
             } else {
-                // Moving right (price increasing)
                 liquidity = liquidity.saturating_add(liquidity_net);
             }
 
@@ -401,14 +395,12 @@ fn engine_swap_internal(
                 next_tick
             };
         } else if sqrt_next != sqrt_price {
-            // Moved within tick range
             sqrt_price = sqrt_next;
 
             if amount_remaining <= 0 {
                 break;
             }
         } else {
-            // No movement, exit loop
             break;
         }
     }

@@ -1,22 +1,24 @@
+// Compatible with OpenZeppelin Stellar Soroban Contracts patterns
+//
 //! # Math Module
-//! 
+//!
 //! Mathematical operations for BelugaSwap AMM.
 //! All calculations use Q64.64 fixed-point format.
-//! 
+//!
 //! ## Q64.64 Format
 //! - Integers are multiplied by 2^64
 //! - Example: 1.0 = 2^64 = 18446744073709551616
-//! 
+//!
 //! ## Safety
 //! - Uses U256 for intermediate calculations to prevent overflow
 //! - All functions are designed to saturate rather than overflow
 
 use soroban_sdk::{Env, U256};
 
-use crate::constants::{MIN_TICK, MAX_TICK, Q64, MIN_LIQUIDITY as CONST_MIN_LIQUIDITY};
+use crate::constants::{MIN_LIQUIDITY as CONST_MIN_LIQUIDITY, MIN_TICK, MAX_TICK, Q64};
 
 // ============================================================
-// INTERNAL CONSTANTS
+// EXPORTED CONSTANTS
 // ============================================================
 
 const ONE_X64: u128 = Q64;
@@ -31,20 +33,20 @@ pub const MIN_LIQUIDITY: i128 = CONST_MIN_LIQUIDITY;
 // TYPE CONVERSION HELPERS
 // ============================================================
 
-/// Convert i128 to u128, returning 0 for negative values
+/// Convert i128 to u128 safely, returning 0 for negative values
 #[inline]
 fn i128_to_u128_safe(x: i128) -> u128 {
     if x <= 0 { 0 } else { x as u128 }
 }
 
-/// Convert u128 to i128 with saturation
+/// Convert u128 to i128 with saturation at i128::MAX
 #[inline]
 fn u128_to_i128_saturating(x: u128) -> i128 {
     if x > i128::MAX as u128 { i128::MAX } else { x as i128 }
 }
 
 // ============================================================
-// Q64.64 ARITHMETIC
+// Q64.64 ARITHMETIC (Core Operations)
 // ============================================================
 
 /// Multiply two Q64.64 numbers, returning Q64.64 result
@@ -55,37 +57,34 @@ pub fn mul_q64(a: u128, b: u128) -> u128 {
     let a_lo = a & 0xFFFFFFFFFFFFFFFF;
     let b_hi = b >> 64;
     let b_lo = b & 0xFFFFFFFFFFFFFFFF;
-    
+
     let term_hh = a_hi * b_hi;
     let term_hl = a_hi * b_lo;
     let term_lh = a_lo * b_hi;
     let term_ll = a_lo * b_lo;
-    
+
     (term_hh << 64) + term_hl + term_lh + (term_ll >> 64)
 }
 
 /// Divide in Q64.64 format: (a * 2^64) / b
-/// Returns Q64.64 result
 #[inline]
 pub fn div_q64(a: u128, b: u128) -> u128 {
     if b == 0 { return u128::MAX; }
-    
-    // Try direct calculation if no overflow
+
     if a <= (u128::MAX >> 64) {
         return (a << 64) / b;
     }
-    
-    // Decompose for large values
+
     let q = a / b;
     let r = a % b;
-    
+
     let q_part = q << 64;
     let r_part = if r <= (u128::MAX >> 64) {
         (r << 64) / b
     } else {
         ((r >> 32) << 32) / (b >> 32).max(1)
     };
-    
+
     q_part.saturating_add(r_part)
 }
 
@@ -94,7 +93,6 @@ pub fn div_q64(a: u128, b: u128) -> u128 {
 pub fn mul_div(env: &Env, a: u128, b: u128, denominator: u128) -> u128 {
     if denominator == 0 { panic!("mul_div: divide by zero"); }
 
-    // Use U256 for intermediate calculation
     let a_256 = U256::from_u128(env, a);
     let b_256 = U256::from_u128(env, b);
     let den_256 = U256::from_u128(env, denominator);
@@ -133,17 +131,16 @@ pub fn snap_tick_to_spacing(tick: i32, spacing: i32) -> i32 {
 /// Convert tick to sqrt price in Q64.64 format
 /// Formula: sqrt(1.0001^tick) * 2^64
 pub fn get_sqrt_ratio_at_tick(tick: i32) -> u128 {
-    if !(MIN_TICK..=MAX_TICK).contains(&tick) { 
-        panic!("tick out of range"); 
+    if !(MIN_TICK..=MAX_TICK).contains(&tick) {
+        panic!("tick out of range");
     }
-    
+
     if tick == 0 { return ONE_X64; }
-    
+
     let abs_tick = tick.unsigned_abs();
     let mut ratio: u128 = ONE_X64;
-    
-    // Binary decomposition of sqrt(1.0001^tick)
-    // Each constant is sqrt(1.0001^(2^n)) * 2^64
+
+    // Binary decomposition constants for sqrt(1.0001^(2^n)) * 2^64
     if abs_tick & 0x1 != 0 { ratio = mul_q64(ratio, 18447666387855958016); }
     if abs_tick & 0x2 != 0 { ratio = mul_q64(ratio, 18448588748116922368); }
     if abs_tick & 0x4 != 0 { ratio = mul_q64(ratio, 18450433606991732736); }
@@ -161,21 +158,20 @@ pub fn get_sqrt_ratio_at_tick(tick: i32) -> u128 {
     if abs_tick & 0x4000 != 0 { ratio = mul_q64(ratio, 40198444615281172480); }
     if abs_tick & 0x8000 != 0 { ratio = mul_q64(ratio, 87150709742682460160); }
     if abs_tick & 0x10000 != 0 { ratio = mul_q64(ratio, 409916713094318874624); }
-    
-    // For negative ticks, invert the ratio
+
     if tick < 0 {
         if ratio == 0 { return u128::MAX; }
-        let numerator = ONE_X64.saturating_mul(ONE_X64); 
+        let numerator = ONE_X64.saturating_mul(ONE_X64);
         ratio = numerator / ratio;
     }
-    
+
     ratio
 }
 
 /// Alias for get_sqrt_ratio_at_tick
 #[allow(dead_code)]
-pub fn tick_to_sqrt_price_x64(_env: &Env, tick: i32) -> u128 { 
-    get_sqrt_ratio_at_tick(tick) 
+pub fn tick_to_sqrt_price_x64(_env: &Env, tick: i32) -> u128 {
+    get_sqrt_ratio_at_tick(tick)
 }
 
 // ============================================================
@@ -183,7 +179,6 @@ pub fn tick_to_sqrt_price_x64(_env: &Env, tick: i32) -> u128 {
 // ============================================================
 
 /// Calculate next sqrt price given input amount
-/// Used during swap to determine price movement
 pub fn get_next_sqrt_price_from_input(
     env: &Env,
     sqrt_price: u128,
@@ -196,16 +191,14 @@ pub fn get_next_sqrt_price_from_input(
     }
 
     if zero_for_one {
-        // Token0 in -> Price decreases
         let product = amount_in.saturating_mul(sqrt_price);
         let numerator = liquidity.saturating_mul(sqrt_price);
-        let liq_shifted = liquidity << 64; 
+        let liq_shifted = liquidity << 64;
         let denominator = liq_shifted.saturating_add(product);
-        
+
         if denominator == 0 { return sqrt_price; }
         mul_div(env, numerator, ONE_X64, denominator)
     } else {
-        // Token1 in -> Price increases
         let quotient = div_q64(amount_in, liquidity);
         sqrt_price.saturating_add(quotient)
     }
@@ -225,17 +218,15 @@ pub fn get_next_sqrt_price_from_output(
     }
 
     if zero_for_one {
-        // Token1 out -> Price decreases
-        let quotient = div_q64(amount_out, liquidity); 
+        let quotient = div_q64(amount_out, liquidity);
         sqrt_price.saturating_sub(quotient)
     } else {
-        // Token0 out -> Price increases
         let product = amount_out.saturating_mul(sqrt_price);
         let numerator = liquidity.saturating_mul(sqrt_price);
         let liq_shifted = liquidity << 64;
         let denominator = liq_shifted.saturating_sub(product);
-        
-        if denominator == 0 { return u128::MAX; } 
+
+        if denominator == 0 { return u128::MAX; }
         mul_div(env, numerator, ONE_X64, denominator)
     }
 }
@@ -245,7 +236,6 @@ pub fn get_next_sqrt_price_from_output(
 // ============================================================
 
 /// Calculate token0 amount for a liquidity and price range
-/// Formula: L * (sqrt_upper - sqrt_lower) / (sqrt_upper * sqrt_lower)
 pub fn get_amount_0_delta(
     sqrt_price_a: u128,
     sqrt_price_b: u128,
@@ -260,11 +250,11 @@ pub fn get_amount_0_delta(
 
     let delta_price = sqrt_upper.saturating_sub(sqrt_lower);
     let product_prices = mul_q64(sqrt_upper, sqrt_lower);
-    
+
     if product_prices == 0 { return 0; }
-    
+
     let numerator = liquidity.saturating_mul(delta_price);
-    
+
     if round_up {
         div_round_up(numerator, product_prices)
     } else {
@@ -273,7 +263,6 @@ pub fn get_amount_0_delta(
 }
 
 /// Calculate token1 amount for a liquidity and price range
-/// Formula: L * (sqrt_upper - sqrt_lower)
 pub fn get_amount_1_delta(
     sqrt_price_a: u128,
     sqrt_price_b: u128,
@@ -288,7 +277,7 @@ pub fn get_amount_1_delta(
 
     let delta = sqrt_upper.saturating_sub(sqrt_lower);
     let product = liquidity.saturating_mul(delta);
-    
+
     if round_up {
         if product & 0xFFFFFFFFFFFFFFFF != 0 {
             (product >> 64) + 1
@@ -305,7 +294,6 @@ pub fn get_amount_1_delta(
 // ============================================================
 
 /// Compute a single swap step
-/// Returns: (next_sqrt_price, amount_in, amount_out)
 #[allow(dead_code)]
 pub fn compute_swap_step(
     env: &Env,
@@ -317,33 +305,29 @@ pub fn compute_swap_step(
     if liquidity <= 0 || amount_remaining <= 0 {
         return (sqrt_price_current, 0, 0);
     }
-    
+
     let liq_u = i128_to_u128_safe(liquidity);
     let amt_in_remaining = i128_to_u128_safe(amount_remaining);
-    
+
     let next_sqrt_price = get_next_sqrt_price_from_input(
-        env,
-        sqrt_price_current,
-        liq_u,
-        amt_in_remaining,
-        zero_for_one
+        env, sqrt_price_current, liq_u, amt_in_remaining, zero_for_one
     );
-    
+
     let price_delta = next_sqrt_price.abs_diff(sqrt_price_current);
-    
+
     if price_delta < MIN_PRICE_DELTA {
         return (sqrt_price_current, 0, 0);
     }
 
     let amount_0 = get_amount_0_delta(sqrt_price_current, next_sqrt_price, liq_u, true);
     let amount_1 = get_amount_1_delta(sqrt_price_current, next_sqrt_price, liq_u, true);
-    
+
     let (amount_in, amount_out) = if zero_for_one {
         (amount_0, amount_1)
     } else {
         (amount_1, amount_0)
     };
-    
+
     let final_amount_in = amount_in.min(amt_in_remaining);
 
     (
@@ -354,8 +338,6 @@ pub fn compute_swap_step(
 }
 
 /// Compute swap step with a target price
-/// Used when approaching a tick boundary
-/// Returns: (next_sqrt_price, amount_in, amount_out)
 pub fn compute_swap_step_with_target(
     env: &Env,
     sqrt_price_current: u128,
@@ -368,14 +350,9 @@ pub fn compute_swap_step_with_target(
     let amount_rem_u = i128_to_u128_safe(amount_specified);
 
     let next_price_input = get_next_sqrt_price_from_input(
-        env,
-        sqrt_price_current,
-        liq_u,
-        amount_rem_u,
-        zero_for_one
+        env, sqrt_price_current, liq_u, amount_rem_u, zero_for_one
     );
 
-    // Check if we reach the target price
     let target_reached = if zero_for_one {
         next_price_input <= sqrt_price_target
     } else {
@@ -388,7 +365,6 @@ pub fn compute_swap_step_with_target(
         next_price_input
     };
 
-    // Calculate amounts based on final price
     let (amount_in, amount_out) = if zero_for_one {
         (
             get_amount_0_delta(sqrt_price_current, sqrt_price_next, liq_u, true),
@@ -401,7 +377,6 @@ pub fn compute_swap_step_with_target(
         )
     };
 
-    // Cap amount_in to remaining amount if target not reached
     let final_amount_in = if !target_reached && amount_in > amount_rem_u {
         amount_rem_u
     } else {
@@ -421,59 +396,55 @@ pub fn compute_swap_step_with_target(
 
 /// Calculate liquidity from token0 amount
 pub fn get_liquidity_for_amount0(
-    _env: &Env, 
-    amount0: i128, 
-    sqrt_price_lower: u128, 
+    _env: &Env,
+    amount0: i128,
+    sqrt_price_lower: u128,
     sqrt_price_upper: u128
 ) -> i128 {
     if amount0 <= 0 || sqrt_price_lower >= sqrt_price_upper { return 0; }
-    
+
     let amt0_u = i128_to_u128_safe(amount0);
     let product = mul_q64(sqrt_price_upper, sqrt_price_lower);
-    let numerator = amt0_u.saturating_mul(product); 
+    let numerator = amt0_u.saturating_mul(product);
     let denominator = sqrt_price_upper.saturating_sub(sqrt_price_lower);
-    
+
     if denominator == 0 { return 0; }
     u128_to_i128_saturating(numerator / denominator)
 }
 
 /// Calculate liquidity from token1 amount
 pub fn get_liquidity_for_amount1(
-    _env: &Env, 
-    amount1: i128, 
-    sqrt_price_lower: u128, 
+    _env: &Env,
+    amount1: i128,
+    sqrt_price_lower: u128,
     sqrt_price_upper: u128
 ) -> i128 {
     if amount1 <= 0 || sqrt_price_lower >= sqrt_price_upper { return 0; }
-    
+
     let amt1_u = i128_to_u128_safe(amount1);
     let diff = sqrt_price_upper.saturating_sub(sqrt_price_lower);
-    
+
     if diff == 0 { return 0; }
     let liq_u = div_q64(amt1_u, diff);
     u128_to_i128_saturating(liq_u)
 }
 
 /// Calculate liquidity from both token amounts
-/// Returns the minimum liquidity that can be provided with given amounts
 pub fn get_liquidity_for_amounts(
     env: &Env,
-    amount0_desired: i128, 
+    amount0_desired: i128,
     amount1_desired: i128,
-    sqrt_price_lower: u128, 
-    sqrt_price_upper: u128, 
+    sqrt_price_lower: u128,
+    sqrt_price_upper: u128,
     current_sqrt_price: u128,
 ) -> i128 {
     if sqrt_price_lower >= sqrt_price_upper { return 0; }
-    
+
     if current_sqrt_price <= sqrt_price_lower {
-        // Current price below range: only token0 needed
         get_liquidity_for_amount0(env, amount0_desired, sqrt_price_lower, sqrt_price_upper)
     } else if current_sqrt_price >= sqrt_price_upper {
-        // Current price above range: only token1 needed
         get_liquidity_for_amount1(env, amount1_desired, sqrt_price_lower, sqrt_price_upper)
     } else {
-        // Current price in range: both tokens needed
         let liq0 = get_liquidity_for_amount0(env, amount0_desired, current_sqrt_price, sqrt_price_upper);
         let liq1 = get_liquidity_for_amount1(env, amount1_desired, sqrt_price_lower, current_sqrt_price);
         liq0.min(liq1)
@@ -481,34 +452,32 @@ pub fn get_liquidity_for_amounts(
 }
 
 /// Calculate token amounts from liquidity
-/// Returns: (amount0, amount1)
 pub fn get_amounts_for_liquidity(
-    _env: &Env, 
-    liquidity: i128, 
-    sqrt_price_lower: u128, 
-    sqrt_price_upper: u128, 
+    _env: &Env,
+    liquidity: i128,
+    sqrt_price_lower: u128,
+    sqrt_price_upper: u128,
     current_sqrt_price: u128,
 ) -> (i128, i128) {
     if liquidity <= 0 { return (0, 0); }
-    
+
     let liq_u = i128_to_u128_safe(liquidity);
-    
-    // Clamp current price to range
+
     let sp = current_sqrt_price
         .max(sqrt_price_lower)
         .min(sqrt_price_upper);
-    
-    let amount0_u = if sp < sqrt_price_upper { 
-        get_amount_0_delta(sp, sqrt_price_upper, liq_u, false) 
-    } else { 
-        0 
+
+    let amount0_u = if sp < sqrt_price_upper {
+        get_amount_0_delta(sp, sqrt_price_upper, liq_u, false)
+    } else {
+        0
     };
-    
-    let amount1_u = if sp > sqrt_price_lower { 
-        get_amount_1_delta(sqrt_price_lower, sp, liq_u, false) 
-    } else { 
-        0 
+
+    let amount1_u = if sp > sqrt_price_lower {
+        get_amount_1_delta(sqrt_price_lower, sp, liq_u, false)
+    } else {
+        0
     };
-    
+
     (u128_to_i128_saturating(amount0_u), u128_to_i128_saturating(amount1_u))
 }

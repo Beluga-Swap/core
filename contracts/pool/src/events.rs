@@ -1,273 +1,220 @@
-// Factory events module for BelugaSwap
-// All events use compact names to reduce storage/gas costs
+// Compatible with OpenZeppelin Stellar Soroban Contracts patterns
+//
+// Events module following OpenZeppelin conventions:
+// - Clear event structure with typed data
+// - Consistent naming convention
+// - Event topics for indexing
 
-use soroban_sdk::{Address, Env, Symbol};
+use soroban_sdk::{contracttype, Env, Symbol, Address};
 
-/// Emitted when the factory is initialized
-/// Topics: ("FactoryInit",)
-/// Data: (admin, pool_wasm_hash, min_initial_liquidity)
-pub fn emit_factory_initialized(
-    env: &Env,
-    admin: &Address,
-    pool_wasm_hash: &soroban_sdk::BytesN<32>,
-    min_initial_liquidity: i128,
-) {
-    env.events().publish(
-        (Symbol::new(env, "FactoryInit"),),
-        (admin.clone(), pool_wasm_hash.clone(), min_initial_liquidity),
-    );
+// ============================================================
+// EVENT TOPICS (OpenZeppelin Style)
+// ============================================================
+// Using Symbol for event topics, following Soroban best practices
+
+/// Event topic constants
+pub struct EventTopic;
+
+impl EventTopic {
+    /// Pool initialized event topic
+    #[inline]
+    pub fn initialized(env: &Env) -> Symbol {
+        Symbol::new(env, "Initialized")
+    }
+
+    /// Pool init (with price info) event topic
+    #[inline]
+    pub fn pool_init(env: &Env) -> Symbol {
+        Symbol::new(env, "PoolInit")
+    }
+
+    /// Liquidity added event topic
+    #[inline]
+    pub fn liquidity_added(env: &Env) -> Symbol {
+        Symbol::new(env, "LiquidityAdded")
+    }
+
+    /// Liquidity removed event topic
+    #[inline]
+    pub fn liquidity_removed(env: &Env) -> Symbol {
+        Symbol::new(env, "LiquidityRemoved")
+    }
+
+    /// Swap executed event topic
+    #[inline]
+    pub fn swap(env: &Env) -> Symbol {
+        Symbol::new(env, "Swap")
+    }
+
+    /// Fees collected event topic
+    #[inline]
+    pub fn fees_collected(env: &Env) -> Symbol {
+        Symbol::new(env, "FeesCollected")
+    }
+
+    /// Tick synced event topic (for debugging/indexing)
+    #[inline]
+    pub fn tick_synced(env: &Env) -> Symbol {
+        Symbol::new(env, "TickSynced")
+    }
+
+    /// Creator fees claimed event topic
+    #[inline]
+    pub fn creator_fees_claimed(env: &Env) -> Symbol {
+        Symbol::new(env, "CreatorFeesClaimed")
+    }
 }
 
-/// Emitted when a new pool is created
-/// Topics: ("PoolCreated",)
-/// Data: (pool_address, token0, token1, creator, fee_bps)
-pub fn emit_pool_created_simple(
-    env: &Env,
-    pool_address: &Address,
-    token0: &Address,
-    token1: &Address,
-    creator: &Address,
-    fee_bps: u32,
-) {
-    env.events().publish(
-        (Symbol::new(env, "PoolCreated"),),
-        (
-            pool_address.clone(),
-            token0.clone(),
-            token1.clone(),
-            creator.clone(),
-            fee_bps,
-        ),
-    );
+// ============================================================
+// EVENT DATA STRUCTURES (OpenZeppelin Style)
+// ============================================================
+// Typed event data structures for better documentation and type safety
+
+/// Data for Initialized event
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct InitializedEventData {
+    pub fee_bps: u32,
+    pub creator_fee_bps: u32,
+    pub tick_spacing: i32,
 }
 
-/// Emitted with full pool creation details
-/// Topics: ("PoolCreatedFull",)
-/// Data: (pool_address, token0, token1, creator, fee_bps, creator_fee_bps, tick_spacing, sqrt_price)
-pub fn emit_pool_created_full(
-    env: &Env,
-    pool_address: &Address,
-    token0: &Address,
-    token1: &Address,
-    creator: &Address,
-    fee_bps: u32,
-    creator_fee_bps: u32,
-    tick_spacing: i32,
-    initial_sqrt_price: u128,
-) {
+/// Data for PoolInit event
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct PoolInitEventData {
+    pub sqrt_price_x64: u128,
+    pub current_tick: i32,
+    pub tick_spacing: i32,
+}
+
+/// Data for LiquidityAdded event
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct LiquidityAddedEventData {
+    pub owner: Address,
+    pub lower_tick: i32,
+    pub upper_tick: i32,
+    pub liquidity: i128,
+    pub amount0: i128,
+    pub amount1: i128,
+}
+
+/// Data for LiquidityRemoved event
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct LiquidityRemovedEventData {
+    pub owner: Address,
+    pub lower_tick: i32,
+    pub upper_tick: i32,
+    pub liquidity: i128,
+    pub amount0: i128,
+    pub amount1: i128,
+}
+
+/// Data for Swap event
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct SwapEventData {
+    pub sender: Address,
+    pub amount_in: i128,
+    pub amount_out: i128,
+    pub zero_for_one: bool,
+    pub sqrt_price_x64: u128,
+    pub current_tick: i32,
+}
+
+/// Data for FeesCollected event
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct FeesCollectedEventData {
+    pub owner: Address,
+    pub amount0: u128,
+    pub amount1: u128,
+}
+
+/// Data for CreatorFeesClaimed event
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct CreatorFeesClaimedEventData {
+    pub creator: Address,
+    pub amount0: u128,
+    pub amount1: u128,
+}
+
+// ============================================================
+// EVENT EMITTERS (OpenZeppelin Style)
+// ============================================================
+// Functions to emit events with proper structure
+
+/// Emit pool initialized event
+pub fn emit_initialized(env: &Env, fee_bps: u32, creator_fee_bps: u32, tick_spacing: i32) {
     env.events().publish(
-        (Symbol::new(env, "PoolCreatedFull"),),
-        (
-            pool_address.clone(),
-            token0.clone(),
-            token1.clone(),
-            creator.clone(),
+        (EventTopic::initialized(env),),
+        InitializedEventData {
             fee_bps,
             creator_fee_bps,
             tick_spacing,
-            initial_sqrt_price,
-        ),
+        },
     );
 }
 
-/// Emitted when liquidity is locked
-/// Topics: ("LiqLocked",)
-/// Data: (pool_address, owner, liquidity, lower_tick, upper_tick, is_permanent)
-pub fn emit_liquidity_locked_simple(
-    env: &Env,
-    pool_address: &Address,
-    owner: &Address,
-    liquidity: i128,
-    lower_tick: i32,
-    upper_tick: i32,
-    is_permanent: bool,
-) {
+/// Emit pool init event (with price info)
+pub fn emit_pool_init(env: &Env, sqrt_price_x64: u128, current_tick: i32, tick_spacing: i32) {
     env.events().publish(
-        (Symbol::new(env, "LiqLocked"),),
-        (
-            pool_address.clone(),
-            owner.clone(),
-            liquidity,
-            lower_tick,
-            upper_tick,
-            is_permanent,
-        ),
+        (EventTopic::pool_init(env),),
+        PoolInitEventData {
+            sqrt_price_x64,
+            current_tick,
+            tick_spacing,
+        },
     );
 }
 
-/// Emitted with full lock details
-/// Topics: ("LiqLockedFull",)
-/// Data: (pool_address, owner, liquidity, lower_tick, upper_tick, lock_start, lock_end, is_permanent, amount0, amount1)
-pub fn emit_liquidity_locked_full(
-    env: &Env,
-    pool_address: &Address,
-    owner: &Address,
-    liquidity: i128,
-    lower_tick: i32,
-    upper_tick: i32,
-    lock_start: u32,
-    lock_end: u32,
-    is_permanent: bool,
-    amount0: i128,
-    amount1: i128,
-) {
+/// Emit add liquidity event (simple version for backward compatibility)
+pub fn emit_add_liquidity(env: &Env, liquidity: i128, amount0: i128, amount1: i128) {
     env.events().publish(
-        (Symbol::new(env, "LiqLockedFull"),),
-        (
-            pool_address.clone(),
-            owner.clone(),
-            liquidity,
-            lower_tick,
-            upper_tick,
-            lock_start,
-            lock_end,
-            is_permanent,
-            amount0,
-            amount1,
-        ),
+        (EventTopic::liquidity_added(env),),
+        (liquidity, amount0, amount1),
     );
 }
 
-/// Emitted when liquidity is unlocked
-/// Topics: ("LiqUnlocked",)
-/// Data: (pool_address, owner, liquidity, lower_tick, upper_tick)
-pub fn emit_liquidity_unlocked(
-    env: &Env,
-    pool_address: &Address,
-    owner: &Address,
-    liquidity: i128,
-    lower_tick: i32,
-    upper_tick: i32,
-) {
+/// Emit remove liquidity event (simple version for backward compatibility)
+pub fn emit_remove_liquidity(env: &Env, liquidity: i128, amount0: i128, amount1: i128) {
     env.events().publish(
-        (Symbol::new(env, "LiqUnlocked"),),
-        (
-            pool_address.clone(),
-            owner.clone(),
-            liquidity,
-            lower_tick,
-            upper_tick,
-        ),
+        (EventTopic::liquidity_removed(env),),
+        (liquidity, amount0, amount1),
     );
 }
 
-/// Emitted when lock duration is extended
-/// Topics: ("LockExtended",)
-/// Data: (pool_address, owner, lower_tick, upper_tick, new_lock_end)
-pub fn emit_lock_extended(
-    env: &Env,
-    pool_address: &Address,
-    owner: &Address,
-    lower_tick: i32,
-    upper_tick: i32,
-    new_lock_end: u32,
-) {
+/// Emit swap event (simple version for backward compatibility)
+pub fn emit_swap(env: &Env, amount_in: i128, amount_out: i128, zero_for_one: bool) {
     env.events().publish(
-        (Symbol::new(env, "LockExtended"),),
-        (
-            pool_address.clone(),
-            owner.clone(),
-            lower_tick,
-            upper_tick,
-            new_lock_end,
-        ),
+        (EventTopic::swap(env),),
+        (amount_in, amount_out, zero_for_one),
     );
 }
 
-/// Emitted when a timed lock is converted to permanent
-/// Topics: ("LockPermanent",)
-/// Data: (pool_address, owner, lower_tick, upper_tick)
-pub fn emit_lock_made_permanent(
-    env: &Env,
-    pool_address: &Address,
-    owner: &Address,
-    lower_tick: i32,
-    upper_tick: i32,
-) {
+/// Emit collect fees event (simple version for backward compatibility)
+pub fn emit_collect(env: &Env, amount0: u128, amount1: u128) {
     env.events().publish(
-        (Symbol::new(env, "LockPermanent"),),
-        (pool_address.clone(), owner.clone(), lower_tick, upper_tick),
+        (EventTopic::fees_collected(env),),
+        (amount0, amount1),
     );
 }
 
-/// Emitted when creator claims fees
-/// Topics: ("CreatorClaim",)
-/// Data: (pool_address, creator, amount0, amount1, was_in_range)
-pub fn emit_creator_fees_claimed_simple(
-    env: &Env,
-    pool_address: &Address,
-    creator: &Address,
-    amount0: u128,
-    amount1: u128,
-    was_in_range: bool,
-) {
+/// Emit tick sync event (for debugging/indexing)
+pub fn emit_sync_tick(env: &Env, tick: i32, sqrt_price_x64: u128) {
     env.events().publish(
-        (Symbol::new(env, "CreatorClaim"),),
-        (
-            pool_address.clone(),
-            creator.clone(),
-            amount0,
-            amount1,
-            was_in_range,
-        ),
+        (EventTopic::tick_synced(env),),
+        (tick, sqrt_price_x64),
     );
 }
 
-/// Emitted when creator fee rights are revoked
-/// Topics: ("CreatorRevoked",)
-/// Data: (pool_address, creator, reason)
-pub fn emit_creator_rights_revoked(
-    env: &Env,
-    pool_address: &Address,
-    creator: &Address,
-    reason: &str,
-) {
+/// Emit claim creator fees event (simple version for backward compatibility)
+pub fn emit_claim_creator_fees(env: &Env, amount0: u128, amount1: u128) {
     env.events().publish(
-        (Symbol::new(env, "CreatorRevoked"),),
-        (
-            pool_address.clone(),
-            creator.clone(),
-            Symbol::new(env, reason),
-        ),
-    );
-}
-
-/// Emitted when a fee tier is added or updated
-/// Topics: ("TierUpdated",)
-/// Data: (fee_bps, tick_spacing, enabled)
-pub fn emit_fee_tier_updated(env: &Env, fee_bps: u32, tick_spacing: i32, enabled: bool) {
-    env.events().publish(
-        (Symbol::new(env, "TierUpdated"),),
-        (fee_bps, tick_spacing, enabled),
-    );
-}
-
-/// Emitted when admin is updated
-/// Topics: ("AdminUpd",)
-/// Data: (old_admin, new_admin)
-pub fn emit_admin_updated(env: &Env, old_admin: &Address, new_admin: &Address) {
-    env.events().publish(
-        (Symbol::new(env, "AdminUpd"),),
-        (old_admin.clone(), new_admin.clone()),
-    );
-}
-
-/// Emitted when factory config is updated
-/// Topics: ("ConfigUpd",)
-/// Data: (param_name, new_value)
-pub fn emit_config_updated(env: &Env, param_name: &str, new_value: i128) {
-    env.events().publish(
-        (Symbol::new(env, "ConfigUpd"),),
-        (Symbol::new(env, param_name), new_value),
-    );
-}
-
-/// Emitted when pool WASM hash is updated
-/// Topics: ("WasmUpdated",)
-/// Data: (new_hash)
-pub fn emit_wasm_hash_updated(env: &Env, new_hash: &soroban_sdk::BytesN<32>) {
-    env.events().publish(
-        (Symbol::new(env, "WasmUpdated"),),
-        (new_hash.clone(),),
+        (EventTopic::creator_fees_claimed(env),),
+        (amount0, amount1),
     );
 }

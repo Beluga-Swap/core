@@ -1,0 +1,15 @@
+[package]
+name = "belugaswap-swap"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+soroban-sdk = { workspace = true }
+belugaswap-math = { path = "../math" }
+belugaswap-tick = { path = "../tick" }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+
+[lib]
+crate-type = ["cdylib", "rlib"]

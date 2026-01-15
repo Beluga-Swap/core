@@ -1,0 +1,25 @@
+[package]
+name = "belugaswap-pool"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+belugaswap-math = { path = "../../packages/math" }
+belugaswap-tick = { path = "../../packages/tick" }
+belugaswap-position = { path = "../../packages/position" }
+belugaswap-swap = { path = "../../packages/swap" }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+debug = 0
+strip = "symbols"
+codegen-units = 1
+lto = true

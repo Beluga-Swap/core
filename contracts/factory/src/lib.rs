@@ -375,7 +375,7 @@ impl BelugaFactory {
         // Get creator fees info from pool
         let (is_in_range, pending_fees_0, pending_fees_1): (bool, u128, u128) = env.invoke_contract(
             &pool_address,
-            &Symbol::new(&env, "get_creator_fees"),
+            &Symbol::new(&env, "get_creator_fees_ex"),
             vec![
                 &env,
                 creator.clone().into_val(&env),
@@ -391,7 +391,7 @@ impl BelugaFactory {
         // Claim fees from pool
         let (claimed_0, claimed_1): (u128, u128) = env.invoke_contract(
             &pool_address,
-            &Symbol::new(&env, "claim_creator_fees"),
+            &Symbol::new(&env, "claim_creator_fees_ex"),
             vec![
                 &env,
                 creator.clone().into_val(&env),
@@ -428,7 +428,7 @@ impl BelugaFactory {
         
         let (is_in_range, pending_fees_0, pending_fees_1): (bool, u128, u128) = env.invoke_contract(
             &pool_address,
-            &Symbol::new(&env, "get_creator_fees"),
+            &Symbol::new(&env, "get_creator_fees_ex"),
             vec![
                 &env,
                 creator.clone().into_val(&env),

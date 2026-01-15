@@ -31,7 +31,6 @@ impl BelugaPool {
     // INITIALIZATION
     // ========================================================
     
-    /// Initialize pool - original signature for direct deployment
     pub fn initialize(
         env: Env,
         creator: Address,
@@ -68,6 +67,7 @@ impl BelugaPool {
         };
         
         let config = PoolConfig {
+            factory: creator.clone(), // When deployed directly, creator acts as factory
             creator,
             token_a,
             token_b,
@@ -136,7 +136,6 @@ impl BelugaPool {
         }
     }
     
-    /// Get creator fees - original simple version
     pub fn get_creator_fees(env: Env) -> CreatorFeesInfo {
         let pool = read_pool_state(&env);
         CreatorFeesInfo {
@@ -156,15 +155,11 @@ impl BelugaPool {
         let state = read_pool_state(&env);
         let config = read_pool_config(&env);
         
-        // Verify this is the actual creator
         if creator != config.creator {
             return (false, 0, 0);
         }
         
-        // Check if position is in range
         let is_in_range = state.current_tick >= lower_tick && state.current_tick < upper_tick;
-        
-        // Return accumulated creator fees
         (is_in_range, state.creator_fees_0, state.creator_fees_1)
     }
     
@@ -279,7 +274,6 @@ impl BelugaPool {
         }
         
         let zero_for_one = token_in == pool.token0;
-        
         Self::preview_swap_advanced(env, amount_in, min_amount_out, zero_for_one, sqrt_price_limit_x64)
     }
     
@@ -391,7 +385,6 @@ impl BelugaPool {
                 } else {
                     0
                 };
-                
                 PreviewResult::valid(amount_in_used, amount_out, fee_paid, price_impact_bps)
             }
             Err(error_symbol) => PreviewResult::invalid(error_symbol),
@@ -414,58 +407,7 @@ impl BelugaPool {
     ) -> (i128, i128, i128) {
         owner.require_auth();
         
-        Self::_add_liquidity_internal(
-            &env,
-            &owner,
-            lower_tick,
-            upper_tick,
-            amount0_desired,
-            amount1_desired,
-            amount0_min,
-            amount1_min,
-            true, // do transfer
-        )
-    }
-    
-    /// Mint liquidity - simplified version for factory
-    /// Assumes tokens are already transferred to pool
-    pub fn mint(
-        env: Env,
-        owner: Address,
-        lower_tick: i32,
-        upper_tick: i32,
-        amount0_desired: i128,
-        amount1_desired: i128,
-    ) -> i128 {
-        owner.require_auth();
-        
-        let (liquidity, _amount0, _amount1) = Self::_add_liquidity_internal(
-            &env,
-            &owner,
-            lower_tick,
-            upper_tick,
-            amount0_desired,
-            amount1_desired,
-            0, // no min check for factory
-            0,
-            false, // don't transfer, factory already did
-        );
-        
-        liquidity
-    }
-    
-    fn _add_liquidity_internal(
-        env: &Env,
-        owner: &Address,
-        lower_tick: i32,
-        upper_tick: i32,
-        amount0_desired: i128,
-        amount1_desired: i128,
-        amount0_min: i128,
-        amount1_min: i128,
-        do_transfer: bool,
-    ) -> (i128, i128, i128) {
-        let mut state = read_pool_state(env);
+        let mut state = read_pool_state(&env);
         
         let lower_aligned = snap_tick_to_spacing(lower_tick, state.tick_spacing);
         let upper_aligned = snap_tick_to_spacing(upper_tick, state.tick_spacing);
@@ -475,7 +417,7 @@ impl BelugaPool {
         }
         
         let liquidity = get_liquidity_for_amounts(
-            env,
+            &env,
             amount0_desired,
             amount1_desired,
             get_sqrt_ratio_at_tick(lower_aligned),
@@ -488,7 +430,7 @@ impl BelugaPool {
         }
         
         let (amount0, amount1) = get_amounts_for_liquidity(
-            env,
+            &env,
             liquidity,
             get_sqrt_ratio_at_tick(lower_aligned),
             get_sqrt_ratio_at_tick(upper_aligned),
@@ -501,7 +443,7 @@ impl BelugaPool {
         
         // Update ticks
         belugaswap_tick::update_tick(
-            env,
+            &env,
             |e, t| read_tick_info(e, t),
             |e, t, info| write_tick_info(e, t, info),
             lower_aligned,
@@ -513,7 +455,7 @@ impl BelugaPool {
         );
         
         belugaswap_tick::update_tick(
-            env,
+            &env,
             |e, t| read_tick_info(e, t),
             |e, t, info| write_tick_info(e, t, info),
             upper_aligned,
@@ -524,16 +466,14 @@ impl BelugaPool {
             true,
         );
         
-        // Update liquidity if in range
         if state.current_tick >= lower_aligned && state.current_tick < upper_aligned {
             state.liquidity = state.liquidity.saturating_add(liquidity);
         }
         
-        write_pool_state(env, &state);
+        write_pool_state(&env, &state);
         
-        // Update position
         let fee_growth_inside = get_fee_growth_inside_local(
-            env,
+            &env,
             lower_aligned,
             upper_aligned,
             state.current_tick,
@@ -541,23 +481,113 @@ impl BelugaPool {
             state.fee_growth_global_1,
         );
         
-        let mut pos = read_position(env, owner, lower_aligned, upper_aligned);
+        let mut pos = read_position(&env, &owner, lower_aligned, upper_aligned);
         modify_position(&mut pos, liquidity, fee_growth_inside.0, fee_growth_inside.1);
-        write_position(env, owner, lower_aligned, upper_aligned, &pos);
+        write_position(&env, &owner, lower_aligned, upper_aligned, &pos);
         
-        // Transfer tokens (only if requested)
-        if do_transfer {
-            if amount0 > 0 {
-                token::Client::new(env, &state.token0).transfer(owner, &env.current_contract_address(), &amount0);
-            }
-            if amount1 > 0 {
-                token::Client::new(env, &state.token1).transfer(owner, &env.current_contract_address(), &amount1);
-            }
+        if amount0 > 0 {
+            token::Client::new(&env, &state.token0).transfer(&owner, &env.current_contract_address(), &amount0);
+        }
+        if amount1 > 0 {
+            token::Client::new(&env, &state.token1).transfer(&owner, &env.current_contract_address(), &amount1);
         }
         
-        emit_add_liquidity(env, liquidity, amount0, amount1);
+        emit_add_liquidity(&env, liquidity, amount0, amount1);
         
         (liquidity, amount0, amount1)
+    }
+    
+    /// Mint liquidity - for factory integration
+    /// Assumes tokens are already transferred to pool by factory
+    pub fn mint(
+        env: Env,
+        owner: Address,
+        lower_tick: i32,
+        upper_tick: i32,
+        amount0_desired: i128,
+        amount1_desired: i128,
+    ) -> i128 {
+        owner.require_auth();
+        
+        let mut state = read_pool_state(&env);
+        
+        let lower_aligned = snap_tick_to_spacing(lower_tick, state.tick_spacing);
+        let upper_aligned = snap_tick_to_spacing(upper_tick, state.tick_spacing);
+        
+        if lower_aligned >= upper_aligned {
+            panic!("{}", ErrorMsg::INVALID_TICK_RANGE);
+        }
+        
+        let liquidity = get_liquidity_for_amounts(
+            &env,
+            amount0_desired,
+            amount1_desired,
+            get_sqrt_ratio_at_tick(lower_aligned),
+            get_sqrt_ratio_at_tick(upper_aligned),
+            state.sqrt_price_x64,
+        );
+        
+        if liquidity < MIN_LIQUIDITY {
+            panic!("{}", ErrorMsg::LIQUIDITY_TOO_LOW);
+        }
+        
+        let (amount0, amount1) = get_amounts_for_liquidity(
+            &env,
+            liquidity,
+            get_sqrt_ratio_at_tick(lower_aligned),
+            get_sqrt_ratio_at_tick(upper_aligned),
+            state.sqrt_price_x64,
+        );
+        
+        // Update ticks
+        belugaswap_tick::update_tick(
+            &env,
+            |e, t| read_tick_info(e, t),
+            |e, t, info| write_tick_info(e, t, info),
+            lower_aligned,
+            state.current_tick,
+            liquidity,
+            state.fee_growth_global_0,
+            state.fee_growth_global_1,
+            false,
+        );
+        
+        belugaswap_tick::update_tick(
+            &env,
+            |e, t| read_tick_info(e, t),
+            |e, t, info| write_tick_info(e, t, info),
+            upper_aligned,
+            state.current_tick,
+            liquidity,
+            state.fee_growth_global_0,
+            state.fee_growth_global_1,
+            true,
+        );
+        
+        if state.current_tick >= lower_aligned && state.current_tick < upper_aligned {
+            state.liquidity = state.liquidity.saturating_add(liquidity);
+        }
+        
+        write_pool_state(&env, &state);
+        
+        let fee_growth_inside = get_fee_growth_inside_local(
+            &env,
+            lower_aligned,
+            upper_aligned,
+            state.current_tick,
+            state.fee_growth_global_0,
+            state.fee_growth_global_1,
+        );
+        
+        let mut pos = read_position(&env, &owner, lower_aligned, upper_aligned);
+        modify_position(&mut pos, liquidity, fee_growth_inside.0, fee_growth_inside.1);
+        write_position(&env, &owner, lower_aligned, upper_aligned, &pos);
+        
+        // NOTE: No token transfer here - factory already transferred tokens
+        
+        emit_add_liquidity(&env, liquidity, amount0, amount1);
+        
+        liquidity
     }
     
     pub fn remove_liquidity(
@@ -708,7 +738,6 @@ impl BelugaPool {
         (amount0_capped, amount1_capped)
     }
     
-    /// Claim creator fees - original version
     pub fn claim_creator_fees(env: Env, claimer: Address) -> (u128, u128) {
         claimer.require_auth();
         
@@ -749,23 +778,13 @@ impl BelugaPool {
     }
     
     /// Claim creator fees - extended version for factory integration
-    /// Allows factory to claim on behalf of creator
     pub fn claim_creator_fees_ex(
         env: Env, 
         claimer: Address,
         _lower_tick: i32,
         _upper_tick: i32,
     ) -> (u128, u128) {
-        claimer.require_auth();
-        
-        let config = read_pool_config(&env);
-        
-        // Allow creator to claim directly
-        if claimer != config.creator {
-            panic!("{}", ErrorMsg::UNAUTHORIZED);
-        }
-        
-        // Reuse existing logic
+        // Just delegate to the original function
         Self::claim_creator_fees(env, claimer)
     }
 }

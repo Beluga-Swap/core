@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 // Q64.64 Fixed-Point Arithmetic Operations
 
 use soroban_sdk::{Env, U256};
@@ -6,7 +5,7 @@ use crate::constants::Q64;
 
 pub const ONE_X64: u128 = Q64;
 
-/// Type conversion helpers
+/// Type conversion helpers - made public for use in other modules
 #[inline]
 pub fn i128_to_u128_safe(x: i128) -> u128 {
     if x <= 0 { 0 } else { x as u128 }
@@ -71,7 +70,7 @@ pub fn mul_div(env: &Env, a: u128, b: u128, denominator: u128) -> u128 {
     result.to_u128().unwrap_or(u128::MAX)
 }
 
-/// Divide with rounding up
+/// Divide with rounding up - made public
 #[inline]
 pub fn div_round_up(numerator: u128, denominator: u128) -> u128 {
     if denominator == 0 { return 0; }

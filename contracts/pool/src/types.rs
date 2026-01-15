@@ -1,6 +1,6 @@
 // Pool Types - Using types from packages
 
-use soroban_sdk::{contracttype, Address, Symbol};
+use soroban_sdk::{contracttype, Address};
 
 // Re-export types from packages
 pub use belugaswap_tick::TickInfo;
@@ -13,10 +13,17 @@ pub use belugaswap_position::{Position, PositionInfo};
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct PoolConfig {
+    /// Factory that deployed this pool (or creator if deployed directly)
+    pub factory: Address,
+    /// Pool creator address
     pub creator: Address,
+    /// First token (original order from creation)
     pub token_a: Address,
+    /// Second token (original order from creation)  
     pub token_b: Address,
+    /// Trading fee in basis points (e.g., 30 = 0.30%)
     pub fee_bps: u32,
+    /// Creator's share of trading fees in basis points
     pub creator_fee_bps: u32,
 }
 

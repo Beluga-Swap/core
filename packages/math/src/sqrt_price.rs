@@ -45,8 +45,7 @@ pub fn get_sqrt_ratio_at_tick(tick: i32) -> u128 {
     ratio
 }
 
-/// Alias for get_sqrt_ratio_at_tick
-#[allow(dead_code)]
+/// Alias for get_sqrt_ratio_at_tick (for backward compatibility)
 pub fn tick_to_sqrt_price_x64(_env: &Env, tick: i32) -> u128 {
     get_sqrt_ratio_at_tick(tick)
 }
@@ -78,7 +77,6 @@ pub fn get_next_sqrt_price_from_input(
 }
 
 /// Calculate next sqrt price given output amount
-#[allow(dead_code)]
 pub fn get_next_sqrt_price_from_output(
     env: &Env,
     sqrt_price: u128,

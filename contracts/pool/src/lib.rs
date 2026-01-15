@@ -9,7 +9,7 @@ use belugaswap_math::{
     constants::{MAX_FEE_BPS, MIN_CREATOR_FEE_BPS, MAX_CREATOR_FEE_BPS}
 };
 use belugaswap_position::{PositionInfo, modify_position, update_position, calculate_pending_fees};
-use belugaswap_swap::{SwapState, SwapResult, PreviewResult, engine_swap, quote_swap, validate_and_preview_swap};
+use belugaswap_swap::{SwapState, SwapResult, PreviewResult, engine_swap, validate_and_preview_swap};
 
 // Local modules
 mod error;
@@ -23,10 +23,10 @@ use storage::*;
 use types::{PoolConfig, PoolState, CreatorFeesInfo};
 
 #[contract]
-pub struct BelugaSwap;
+pub struct BelugaPool;
 
 #[contractimpl]
-impl BelugaSwap {
+impl BelugaPool {
     // ========================================================
     // INITIALIZATION
     // ========================================================
@@ -67,6 +67,7 @@ impl BelugaSwap {
         };
         
         let config = PoolConfig {
+            factory: creator.clone(), // When deployed directly, creator acts as factory
             creator,
             token_a,
             token_b,
@@ -143,6 +144,25 @@ impl BelugaSwap {
         }
     }
     
+    /// Get creator fees with position check - for factory integration
+    /// Returns (is_in_range, pending_fees_0, pending_fees_1)
+    pub fn get_creator_fees_ex(
+        env: Env,
+        creator: Address,
+        lower_tick: i32,
+        upper_tick: i32,
+    ) -> (bool, u128, u128) {
+        let state = read_pool_state(&env);
+        let config = read_pool_config(&env);
+        
+        if creator != config.creator {
+            return (false, 0, 0);
+        }
+        
+        let is_in_range = state.current_tick >= lower_tick && state.current_tick < upper_tick;
+        (is_in_range, state.creator_fees_0, state.creator_fees_1)
+    }
+    
     pub fn get_swap_direction(env: Env, token_in: Address) -> bool {
         let pool = read_pool_state(&env);
         if token_in == pool.token0 {
@@ -179,7 +199,6 @@ impl BelugaSwap {
             panic!("{}", ErrorMsg::INVALID_TOKEN);
         };
         
-        // Convert PoolState to SwapState
         let mut swap_state = SwapState {
             sqrt_price_x64: pool_state.sqrt_price_x64,
             current_tick: pool_state.current_tick,
@@ -206,7 +225,6 @@ impl BelugaSwap {
             panic!("{}", ErrorMsg::SLIPPAGE_EXCEEDED);
         }
         
-        // Update pool state from swap state
         let mut updated_pool = pool_state.clone();
         updated_pool.sqrt_price_x64 = swap_state.sqrt_price_x64;
         updated_pool.current_tick = swap_state.current_tick;
@@ -216,7 +234,6 @@ impl BelugaSwap {
         
         write_pool_state(&env, &updated_pool);
         
-        // Transfer tokens
         let (token_in_addr, token_out_addr) = if zero_for_one {
             (&pool_state.token0, &pool_state.token1)
         } else {
@@ -246,7 +263,6 @@ impl BelugaSwap {
     ) -> PreviewResult {
         let pool = read_pool_state(&env);
         
-        // Validate tokens
         if token_in != pool.token0 && token_in != pool.token1 {
             return PreviewResult::invalid(Symbol::new(&env, "BAD_TOKEN"));
         }
@@ -258,7 +274,6 @@ impl BelugaSwap {
         }
         
         let zero_for_one = token_in == pool.token0;
-        
         Self::preview_swap_advanced(env, amount_in, min_amount_out, zero_for_one, sqrt_price_limit_x64)
     }
     
@@ -301,7 +316,6 @@ impl BelugaSwap {
             panic!("{}", ErrorMsg::SLIPPAGE_EXCEEDED);
         }
         
-        // Update pool state
         let mut updated_pool = pool_state.clone();
         updated_pool.sqrt_price_x64 = swap_state.sqrt_price_x64;
         updated_pool.current_tick = swap_state.current_tick;
@@ -311,7 +325,6 @@ impl BelugaSwap {
         
         write_pool_state(&env, &updated_pool);
         
-        // Execute token transfers
         let (token_in_addr, token_out_addr) = if zero_for_one {
             (&pool_state.token0, &pool_state.token1)
         } else {
@@ -372,7 +385,6 @@ impl BelugaSwap {
                 } else {
                     0
                 };
-                
                 PreviewResult::valid(amount_in_used, amount_out, fee_paid, price_impact_bps)
             }
             Err(error_symbol) => PreviewResult::invalid(error_symbol),
@@ -454,14 +466,12 @@ impl BelugaSwap {
             true,
         );
         
-        // Update liquidity if in range
         if state.current_tick >= lower_aligned && state.current_tick < upper_aligned {
             state.liquidity = state.liquidity.saturating_add(liquidity);
         }
         
         write_pool_state(&env, &state);
         
-        // Update position
         let fee_growth_inside = get_fee_growth_inside_local(
             &env,
             lower_aligned,
@@ -475,7 +485,6 @@ impl BelugaSwap {
         modify_position(&mut pos, liquidity, fee_growth_inside.0, fee_growth_inside.1);
         write_position(&env, &owner, lower_aligned, upper_aligned, &pos);
         
-        // Transfer tokens
         if amount0 > 0 {
             token::Client::new(&env, &state.token0).transfer(&owner, &env.current_contract_address(), &amount0);
         }
@@ -486,6 +495,99 @@ impl BelugaSwap {
         emit_add_liquidity(&env, liquidity, amount0, amount1);
         
         (liquidity, amount0, amount1)
+    }
+    
+    /// Mint liquidity - for factory integration
+    /// Assumes tokens are already transferred to pool by factory
+    pub fn mint(
+        env: Env,
+        owner: Address,
+        lower_tick: i32,
+        upper_tick: i32,
+        amount0_desired: i128,
+        amount1_desired: i128,
+    ) -> i128 {
+        owner.require_auth();
+        
+        let mut state = read_pool_state(&env);
+        
+        let lower_aligned = snap_tick_to_spacing(lower_tick, state.tick_spacing);
+        let upper_aligned = snap_tick_to_spacing(upper_tick, state.tick_spacing);
+        
+        if lower_aligned >= upper_aligned {
+            panic!("{}", ErrorMsg::INVALID_TICK_RANGE);
+        }
+        
+        let liquidity = get_liquidity_for_amounts(
+            &env,
+            amount0_desired,
+            amount1_desired,
+            get_sqrt_ratio_at_tick(lower_aligned),
+            get_sqrt_ratio_at_tick(upper_aligned),
+            state.sqrt_price_x64,
+        );
+        
+        if liquidity < MIN_LIQUIDITY {
+            panic!("{}", ErrorMsg::LIQUIDITY_TOO_LOW);
+        }
+        
+        let (amount0, amount1) = get_amounts_for_liquidity(
+            &env,
+            liquidity,
+            get_sqrt_ratio_at_tick(lower_aligned),
+            get_sqrt_ratio_at_tick(upper_aligned),
+            state.sqrt_price_x64,
+        );
+        
+        // Update ticks
+        belugaswap_tick::update_tick(
+            &env,
+            |e, t| read_tick_info(e, t),
+            |e, t, info| write_tick_info(e, t, info),
+            lower_aligned,
+            state.current_tick,
+            liquidity,
+            state.fee_growth_global_0,
+            state.fee_growth_global_1,
+            false,
+        );
+        
+        belugaswap_tick::update_tick(
+            &env,
+            |e, t| read_tick_info(e, t),
+            |e, t, info| write_tick_info(e, t, info),
+            upper_aligned,
+            state.current_tick,
+            liquidity,
+            state.fee_growth_global_0,
+            state.fee_growth_global_1,
+            true,
+        );
+        
+        if state.current_tick >= lower_aligned && state.current_tick < upper_aligned {
+            state.liquidity = state.liquidity.saturating_add(liquidity);
+        }
+        
+        write_pool_state(&env, &state);
+        
+        let fee_growth_inside = get_fee_growth_inside_local(
+            &env,
+            lower_aligned,
+            upper_aligned,
+            state.current_tick,
+            state.fee_growth_global_0,
+            state.fee_growth_global_1,
+        );
+        
+        let mut pos = read_position(&env, &owner, lower_aligned, upper_aligned);
+        modify_position(&mut pos, liquidity, fee_growth_inside.0, fee_growth_inside.1);
+        write_position(&env, &owner, lower_aligned, upper_aligned, &pos);
+        
+        // NOTE: No token transfer here - factory already transferred tokens
+        
+        emit_add_liquidity(&env, liquidity, amount0, amount1);
+        
+        liquidity
     }
     
     pub fn remove_liquidity(
@@ -507,7 +609,6 @@ impl BelugaSwap {
             panic!("{}", ErrorMsg::INVALID_LIQUIDITY_AMOUNT);
         }
         
-        // Get fee growth inside
         let (inside_0, inside_1) = get_fee_growth_inside_local(
             &env,
             lower,
@@ -523,11 +624,9 @@ impl BelugaSwap {
             panic!("{}", ErrorMsg::INSUFFICIENT_LIQUIDITY);
         }
         
-        // Update position
         modify_position(&mut pos, -liquidity_delta, inside_0, inside_1);
         write_position(&env, &owner, lower, upper, &pos);
         
-        // Update ticks
         belugaswap_tick::update_tick(
             &env,
             |e, t| read_tick_info(e, t),
@@ -552,13 +651,11 @@ impl BelugaSwap {
             true,
         );
         
-        // Update pool liquidity if position was in range
         if pool.current_tick >= lower && pool.current_tick < upper {
             pool.liquidity = pool.liquidity.saturating_sub(liquidity_delta);
         }
         write_pool_state(&env, &pool);
         
-        // Calculate amounts to return
         let sqrt_lower = get_sqrt_ratio_at_tick(lower);
         let sqrt_upper = get_sqrt_ratio_at_tick(upper);
         
@@ -570,7 +667,6 @@ impl BelugaSwap {
             pool.sqrt_price_x64,
         );
         
-        // Transfer tokens
         if amount0 > 0 {
             token::Client::new(&env, &pool.token0).transfer(&pool_addr, &owner, &amount0);
         }
@@ -603,7 +699,6 @@ impl BelugaSwap {
         
         let mut pos = read_position(&env, &owner, lower, upper);
         
-        // Calculate and update fees
         let (inside_0, inside_1) = get_fee_growth_inside_local(
             &env,
             lower,
@@ -618,20 +713,17 @@ impl BelugaSwap {
         let amount0 = pos.tokens_owed_0;
         let amount1 = pos.tokens_owed_1;
         
-        // Cap fees to available balance
         let pool_balance_0 = token::Client::new(&env, &pool.token0).balance(&pool_addr) as u128;
         let pool_balance_1 = token::Client::new(&env, &pool.token1).balance(&pool_addr) as u128;
         
         let amount0_capped = amount0.min(pool_balance_0);
         let amount1_capped = amount1.min(pool_balance_1);
         
-        // Clear collected fees
         pos.tokens_owed_0 = pos.tokens_owed_0.saturating_sub(amount0_capped);
         pos.tokens_owed_1 = pos.tokens_owed_1.saturating_sub(amount1_capped);
         
         write_position(&env, &owner, lower, upper, &pos);
         
-        // Transfer fees
         if amount0_capped > 0 {
             token::Client::new(&env, &pool.token0)
                 .transfer(&pool_addr, &owner, &(amount0_capped as i128));
@@ -653,7 +745,6 @@ impl BelugaSwap {
         let mut pool = read_pool_state(&env);
         let pool_addr = env.current_contract_address();
         
-        // Verify claimer is pool creator
         if claimer != config.creator {
             panic!("{}", ErrorMsg::UNAUTHORIZED);
         }
@@ -661,20 +752,17 @@ impl BelugaSwap {
         let amount0 = pool.creator_fees_0;
         let amount1 = pool.creator_fees_1;
         
-        // Cap fees to available balance
         let pool_balance_0 = token::Client::new(&env, &pool.token0).balance(&pool_addr) as u128;
         let pool_balance_1 = token::Client::new(&env, &pool.token1).balance(&pool_addr) as u128;
         
         let amount0_capped = amount0.min(pool_balance_0);
         let amount1_capped = amount1.min(pool_balance_1);
         
-        // Reset creator fees
         pool.creator_fees_0 = pool.creator_fees_0.saturating_sub(amount0_capped);
         pool.creator_fees_1 = pool.creator_fees_1.saturating_sub(amount1_capped);
         
         write_pool_state(&env, &pool);
         
-        // Transfer creator fees
         if amount0_capped > 0 {
             token::Client::new(&env, &pool.token0)
                 .transfer(&pool_addr, &claimer, &(amount0_capped as i128));
@@ -687,6 +775,17 @@ impl BelugaSwap {
         emit_claim_creator_fees(&env, amount0_capped, amount1_capped);
         
         (amount0_capped, amount1_capped)
+    }
+    
+    /// Claim creator fees - extended version for factory integration
+    pub fn claim_creator_fees_ex(
+        env: Env, 
+        claimer: Address,
+        _lower_tick: i32,
+        _upper_tick: i32,
+    ) -> (u128, u128) {
+        // Just delegate to the original function
+        Self::claim_creator_fees(env, claimer)
     }
 }
 

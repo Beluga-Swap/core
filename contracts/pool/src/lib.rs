@@ -403,6 +403,107 @@ impl BelugaPool {
         
         (liquidity, amount0, amount1)
     }
+
+    // ========================================================
+    // MINT FUNCTION (For Factory Integration)
+    // ========================================================
+    
+    /// Mint liquidity - used by Factory during pool creation
+    /// 
+    /// IMPORTANT: Assumes tokens are ALREADY transferred to pool!
+    /// This is called by Factory after it transfers tokens.
+    /// 
+    /// # Arguments
+    /// * `owner` - Position owner
+    /// * `lower_tick` - Lower tick boundary
+    /// * `upper_tick` - Upper tick boundary
+    /// * `amount0_desired` - Amount of token0 already in pool
+    /// * `amount1_desired` - Amount of token1 already in pool
+    /// 
+    /// # Returns
+    /// Liquidity minted
+    pub fn mint(
+        env: Env,
+        owner: Address,
+        lower_tick: i32,
+        upper_tick: i32,
+        amount0_desired: i128,
+        amount1_desired: i128,
+    ) -> i128 {
+        // Note: No require_auth for owner here because Factory calls this
+        // after transferring tokens. Factory already verified creator auth.
+        
+        let mut state = read_pool_state(&env);
+        
+        let lower_aligned = snap_tick_to_spacing(lower_tick, state.tick_spacing);
+        let upper_aligned = snap_tick_to_spacing(upper_tick, state.tick_spacing);
+        
+        if lower_aligned >= upper_aligned {
+            panic!("{}", ErrorMsg::INVALID_TICK_RANGE);
+        }
+        
+        let liquidity = get_liquidity_for_amounts(
+            &env,
+            amount0_desired,
+            amount1_desired,
+            get_sqrt_ratio_at_tick(lower_aligned),
+            get_sqrt_ratio_at_tick(upper_aligned),
+            state.sqrt_price_x64,
+        );
+        
+        if liquidity < MIN_LIQUIDITY {
+            panic!("{}", ErrorMsg::LIQUIDITY_TOO_LOW);
+        }
+        
+        // Update ticks
+        belugaswap_tick::update_tick(
+            &env,
+            |e, t| read_tick_info(e, t),
+            |e, t, info| write_tick_info(e, t, info),
+            lower_aligned,
+            state.current_tick,
+            liquidity,
+            state.fee_growth_global_0,
+            state.fee_growth_global_1,
+            false,
+        );
+        
+        belugaswap_tick::update_tick(
+            &env,
+            |e, t| read_tick_info(e, t),
+            |e, t, info| write_tick_info(e, t, info),
+            upper_aligned,
+            state.current_tick,
+            liquidity,
+            state.fee_growth_global_0,
+            state.fee_growth_global_1,
+            true,
+        );
+        
+        // Update pool liquidity if in range
+        if state.current_tick >= lower_aligned && state.current_tick < upper_aligned {
+            state.liquidity = state.liquidity.saturating_add(liquidity);
+        }
+        write_pool_state(&env, &state);
+        
+        // Update position
+        let fee_growth_inside = get_fee_growth_inside_local(
+            &env,
+            lower_aligned,
+            upper_aligned,
+            state.current_tick,
+            state.fee_growth_global_0,
+            state.fee_growth_global_1,
+        );
+        
+        let mut pos = read_position(&env, &owner, lower_aligned, upper_aligned);
+        modify_position(&mut pos, liquidity, fee_growth_inside.0, fee_growth_inside.1);
+        write_position(&env, &owner, lower_aligned, upper_aligned, &pos);
+        
+        emit_add_liquidity(&env, liquidity, amount0_desired, amount1_desired);
+        
+        liquidity
+    }
     
     /// Remove liquidity from a position
     pub fn remove_liquidity(

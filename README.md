@@ -71,7 +71,6 @@ See individual contract READMEs for detailed deployment instructions:
 
 Apache License 2.0 - see [LICENSE](LICENSE) file for details.
 
-This project includes explicit patent grants to protect users and contributors.
 
 ## Links
 

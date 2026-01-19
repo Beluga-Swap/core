@@ -26,10 +26,10 @@ mod events;
 mod storage;
 mod types;
 
-use error::FactoryError;
+pub use error::FactoryError;
 use events::*;
 use storage::*;
-use types::*;
+pub use types::*;
 
 // ============================================================
 // CONSTANTS

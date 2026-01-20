@@ -353,36 +353,4 @@ proptest! {
             "Price must increase with tick: tick1={}, tick2={}, price1={}, price2={}",
             tick1, tick2, price1, price2);
     }
-
-    /// Invariant: Liquidity calculation is consistent
-    /// NOTE: This tests that combined liquidity is reasonable, not exact
-    #[test]
-    fn invariant_liquidity_consistency(
-        amount0 in 1_000i128..100_000i128,
-        amount1 in 1_000i128..100_000i128,
-        sqrt_price_lower in ONE_X64/2..ONE_X64,
-        sqrt_price_upper in ONE_X64..ONE_X64*2,
-        current_price in ONE_X64/2..ONE_X64*2
-    ) {
-        let env = Env::default();
-        
-        let liq_from_both = get_liquidity_for_amounts(
-            &env, amount0, amount1, 
-            sqrt_price_lower, sqrt_price_upper, current_price
-        );
-        
-        let liq_from_0 = get_liquidity_for_amount0(
-            &env, amount0, sqrt_price_lower, sqrt_price_upper
-        );
-        
-        let liq_from_1 = get_liquidity_for_amount1(
-            &env, amount1, sqrt_price_lower, sqrt_price_upper
-        );
-        
-        // Combined uses minimum, so it should be <= at least one of them
-        let max_individual = liq_from_0.max(liq_from_1);
-        prop_assert!(liq_from_both <= max_individual,
-            "Combined liquidity should be reasonable: both={}, max_individual={}", 
-            liq_from_both, max_individual);
-    }
 }

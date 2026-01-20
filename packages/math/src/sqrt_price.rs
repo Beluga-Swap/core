@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Sqrt Price Calculations
+// FIXED: Corrected binary decomposition constants for proper monotonicity
 
 use soroban_sdk::Env;
 use crate::constants::{MIN_TICK, MAX_TICK};
@@ -7,6 +8,10 @@ use crate::q64::{mul_q64, div_q64, mul_div, ONE_X64};
 
 /// Convert tick to sqrt price in Q64.64 format
 /// Formula: sqrt(1.0001^tick) * 2^64
+/// 
+/// FIXED: Constants corrected to prevent monotonicity violations
+/// Previous constants had errors up to 16% in higher bits, causing
+/// price to decrease at certain tick values.
 pub fn get_sqrt_ratio_at_tick(tick: i32) -> u128 {
     if !(MIN_TICK..=MAX_TICK).contains(&tick) {
         panic!("tick out of range");
@@ -18,23 +23,25 @@ pub fn get_sqrt_ratio_at_tick(tick: i32) -> u128 {
     let mut ratio: u128 = ONE_X64;
 
     // Binary decomposition constants for sqrt(1.0001^(2^n)) * 2^64
+    // These are CORRECTED values with proper rounding
     if abs_tick & 0x1 != 0 { ratio = mul_q64(ratio, 18447666387855958016); }
     if abs_tick & 0x2 != 0 { ratio = mul_q64(ratio, 18448588748116922368); }
     if abs_tick & 0x4 != 0 { ratio = mul_q64(ratio, 18450433606991732736); }
     if abs_tick & 0x8 != 0 { ratio = mul_q64(ratio, 18454123878217469952); }
     if abs_tick & 0x10 != 0 { ratio = mul_q64(ratio, 18461506635090006016); }
     if abs_tick & 0x20 != 0 { ratio = mul_q64(ratio, 18476281010653908992); }
-    if abs_tick & 0x40 != 0 { ratio = mul_q64(ratio, 18505849059060717568); }
-    if abs_tick & 0x80 != 0 { ratio = mul_q64(ratio, 18565033932859791360); }
-    if abs_tick & 0x100 != 0 { ratio = mul_q64(ratio, 18683636815981789184); }
-    if abs_tick & 0x200 != 0 { ratio = mul_q64(ratio, 18922376066158198784); }
-    if abs_tick & 0x400 != 0 { ratio = mul_q64(ratio, 19403906064415539200); }
-    if abs_tick & 0x800 != 0 { ratio = mul_q64(ratio, 20388321338895749120); }
-    if abs_tick & 0x1000 != 0 { ratio = mul_q64(ratio, 22486086334269071360); }
-    if abs_tick & 0x2000 != 0 { ratio = mul_q64(ratio, 27241267204663885824); }
-    if abs_tick & 0x4000 != 0 { ratio = mul_q64(ratio, 40198444615281172480); }
-    if abs_tick & 0x8000 != 0 { ratio = mul_q64(ratio, 87150709742682460160); }
-    if abs_tick & 0x10000 != 0 { ratio = mul_q64(ratio, 409916713094318874624); }
+    // FIXED: Bits 0x40 and above had significant errors
+    if abs_tick & 0x40 != 0 { ratio = mul_q64(ratio, 18505865242158243840); }  // was: 18505849059060717568
+    if abs_tick & 0x80 != 0 { ratio = mul_q64(ratio, 18565175891880419328); }  // was: 18565033932859791360
+    if abs_tick & 0x100 != 0 { ratio = mul_q64(ratio, 18684368066214916096); }  // was: 18683636815981789184
+    if abs_tick & 0x200 != 0 { ratio = mul_q64(ratio, 18925053041275711488); }  // was: 18922376066158198784
+    if abs_tick & 0x400 != 0 { ratio = mul_q64(ratio, 19415764168677777408); }  // was: 19403906064415539200
+    if abs_tick & 0x800 != 0 { ratio = mul_q64(ratio, 20435687552632946688); }  // was: 20388321338895749120
+    if abs_tick & 0x1000 != 0 { ratio = mul_q64(ratio, 22639080592223793152); }  // was: 22486086334269071360
+    if abs_tick & 0x2000 != 0 { ratio = mul_q64(ratio, 27784196929997144064); }  // was: 27241267204663885824
+    if abs_tick & 0x4000 != 0 { ratio = mul_q64(ratio, 41848122137991208960); }  // was: 40198444615281172480
+    if abs_tick & 0x8000 != 0 { ratio = mul_q64(ratio, 94936283578203242496); }  // was: 87150709742682460160
+    if abs_tick & 0x10000 != 0 { ratio = mul_q64(ratio, 488590176327446167552); }  // was: 409916713094318874624
 
     if tick < 0 {
         if ratio == 0 { return u128::MAX; }

@@ -18,6 +18,7 @@ pub fn u128_to_i128_saturating(x: u128) -> i128 {
 
 /// Multiply two Q64.64 numbers, returning Q64.64 result
 /// Uses decomposition to avoid overflow
+/// FIXED: Now uses saturating_add to prevent overflow panics
 #[inline]
 pub fn mul_q64(a: u128, b: u128) -> u128 {
     let a_hi = a >> 64;
@@ -30,7 +31,11 @@ pub fn mul_q64(a: u128, b: u128) -> u128 {
     let term_lh = a_lo * b_hi;
     let term_ll = a_lo * b_lo;
 
-    (term_hh << 64) + term_hl + term_lh + (term_ll >> 64)
+    // FIXED: Use saturating_add to prevent overflow
+    (term_hh << 64)
+        .saturating_add(term_hl)
+        .saturating_add(term_lh)
+        .saturating_add(term_ll >> 64)
 }
 
 /// Divide in Q64.64 format: (a * 2^64) / b

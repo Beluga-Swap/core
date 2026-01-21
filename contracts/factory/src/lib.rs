@@ -9,12 +9,6 @@
 //! 2. Fee tier standardization
 //! 3. Duplicate prevention
 //! 4. Creator lock management
-//! 
-//! ## 12 Functions:
-//! - Write (3): initialize, create_pool, unlock_creator_liquidity
-//! - Read (6): get_pool_address, is_pool_deployed, get_total_pools, 
-//!             get_all_pool_addresses, get_fee_tier, get_creator_lock
-//! - Admin (3): set_pool_wasm_hash, set_admin, set_fee_tier
 
 use soroban_sdk::{
     contract, contractimpl, vec, Address, BytesN, Env, IntoVal, Symbol, Vec,
@@ -40,6 +34,9 @@ const MIN_LOCK_DURATION: u32 = 120_960;
 
 /// Minimum initial liquidity per token (0.1 with 7 decimals)
 const MIN_INITIAL_LIQUIDITY: i128 = 1_000_000;
+
+/// Maximum fee in bps (1%)
+const MAX_FEE_BPS: u32 = 100;
 
 // ============================================================
 // CONTRACT
@@ -283,7 +280,7 @@ impl BelugaFactory {
     }
     
     // ========================================================
-    // READ FUNCTIONS (6)
+    // READ FUNCTIONS 
     // ========================================================
     
     /// Get pool contract address by token pair and fee tier
@@ -332,8 +329,31 @@ impl BelugaFactory {
         read_creator_lock(&env, &pool_address, &creator)
     }
     
+    /// Check if creator fee is still active (not revoked)
+    /// 
+    /// This is called by Pool contract during swaps to determine
+    /// if creator should still receive fee share.
+    /// 
+    /// Returns true if:
+    /// - Creator lock exists AND
+    /// - fee_revoked == false
+    /// 
+    /// Returns false if:
+    /// - Creator lock doesn't exist OR
+    /// - fee_revoked == true
+    pub fn is_creator_fee_active(
+        env: Env,
+        pool_address: Address,
+        creator: Address,
+    ) -> bool {
+        match read_creator_lock(&env, &pool_address, &creator) {
+            Some(lock) => !lock.fee_revoked,
+            None => false,
+        }
+    }
+    
     // ========================================================
-    // ADMIN FUNCTIONS (3)
+    // ADMIN FUNCTIONS 
     // ========================================================
     
     /// Update pool WASM hash (for future pool deployments)
@@ -349,9 +369,11 @@ impl BelugaFactory {
     }
     
     /// Transfer admin role to new address
+    ///  Both old and new admin must authorize
     pub fn set_admin(env: Env, new_admin: Address) -> Result<(), FactoryError> {
         let mut config = read_config(&env);
         config.admin.require_auth();
+        new_admin.require_auth();  // [FIX] New admin must also authorize
         
         emit_admin_updated(&env, &config.admin, &new_admin);
         
@@ -361,6 +383,7 @@ impl BelugaFactory {
     }
     
     /// Add or update fee tier configuration
+    /// Added fee_bps validation
     pub fn set_fee_tier(
         env: Env,
         fee_bps: u32,
@@ -372,6 +395,11 @@ impl BelugaFactory {
         
         if tick_spacing <= 0 {
             return Err(FactoryError::InvalidTickSpacing);
+        }
+        
+        // Validate fee_bps range
+        if fee_bps == 0 || fee_bps > MAX_FEE_BPS {
+            return Err(FactoryError::InvalidFeeTier);
         }
         
         let tier = FeeTier {

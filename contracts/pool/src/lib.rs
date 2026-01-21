@@ -28,7 +28,7 @@ pub struct BelugaPool;
 #[contractimpl]
 impl BelugaPool {
     // ========================================================
-    // INITIALIZATION (1 Write Function)
+    // INITIALIZATION
     // ========================================================
     
     pub fn initialize(
@@ -84,7 +84,7 @@ impl BelugaPool {
     }
     
     // ========================================================
-    // VIEW FUNCTIONS (7 Read Functions)
+    // VIEW FUNCTIONS
     // ========================================================
     
     /// Check if pool is initialized
@@ -215,7 +215,7 @@ impl BelugaPool {
     }
     
     // ========================================================
-    // SWAP FUNCTION (1 Write Function)
+    // SWAP FUNCTION
     // ========================================================
     
     /// Execute a swap
@@ -228,6 +228,11 @@ impl BelugaPool {
         sqrt_price_limit_x64: u128,
     ) -> SwapResult {
         sender.require_auth();
+        
+        // [FIX #4] Validate amount_in early
+        if amount_in <= 0 {
+            panic!("amount_in must be positive");
+        }
         
         let pool_state = read_pool_state(&env);
         let config = read_pool_config(&env);
@@ -312,86 +317,20 @@ impl BelugaPool {
     ) -> (i128, i128, i128) {
         owner.require_auth();
         
-        let mut state = read_pool_state(&env);
-        
-        let lower_aligned = snap_tick_to_spacing(lower_tick, state.tick_spacing);
-        let upper_aligned = snap_tick_to_spacing(upper_tick, state.tick_spacing);
-        
-        if lower_aligned >= upper_aligned {
-            panic!("{}", ErrorMsg::INVALID_TICK_RANGE);
-        }
-        
-        let liquidity = get_liquidity_for_amounts(
+        // Delegate to internal function
+        let (liquidity, amount0, amount1) = Self::internal_add_liquidity(
             &env,
+            &owner,
+            lower_tick,
+            upper_tick,
             amount0_desired,
             amount1_desired,
-            get_sqrt_ratio_at_tick(lower_aligned),
-            get_sqrt_ratio_at_tick(upper_aligned),
-            state.sqrt_price_x64,
+            amount0_min,
+            amount1_min,
         );
-        
-        if liquidity < MIN_LIQUIDITY {
-            panic!("{}", ErrorMsg::LIQUIDITY_TOO_LOW);
-        }
-        
-        let (amount0, amount1) = get_amounts_for_liquidity(
-            &env,
-            liquidity,
-            get_sqrt_ratio_at_tick(lower_aligned),
-            get_sqrt_ratio_at_tick(upper_aligned),
-            state.sqrt_price_x64,
-        );
-        
-        if amount0 < amount0_min || amount1 < amount1_min {
-            panic!("{}", ErrorMsg::SLIPPAGE_EXCEEDED);
-        }
-        
-        // Update ticks
-        belugaswap_tick::update_tick(
-            &env,
-            |e, t| read_tick_info(e, t),
-            |e, t, info| write_tick_info(e, t, info),
-            lower_aligned,
-            state.current_tick,
-            liquidity,
-            state.fee_growth_global_0,
-            state.fee_growth_global_1,
-            false,
-        );
-        
-        belugaswap_tick::update_tick(
-            &env,
-            |e, t| read_tick_info(e, t),
-            |e, t, info| write_tick_info(e, t, info),
-            upper_aligned,
-            state.current_tick,
-            liquidity,
-            state.fee_growth_global_0,
-            state.fee_growth_global_1,
-            true,
-        );
-        
-        // Update pool liquidity if in range
-        if state.current_tick >= lower_aligned && state.current_tick < upper_aligned {
-            state.liquidity = state.liquidity.saturating_add(liquidity);
-        }
-        write_pool_state(&env, &state);
-        
-        // Update position
-        let fee_growth_inside = get_fee_growth_inside_local(
-            &env,
-            lower_aligned,
-            upper_aligned,
-            state.current_tick,
-            state.fee_growth_global_0,
-            state.fee_growth_global_1,
-        );
-        
-        let mut pos = read_position(&env, &owner, lower_aligned, upper_aligned);
-        modify_position(&mut pos, liquidity, fee_growth_inside.0, fee_growth_inside.1);
-        write_position(&env, &owner, lower_aligned, upper_aligned, &pos);
         
         // Transfer tokens from owner to pool
+        let state = read_pool_state(&env);
         if amount0 > 0 {
             token::Client::new(&env, &state.token0).transfer(&owner, &env.current_contract_address(), &amount0);
         }
@@ -405,13 +344,14 @@ impl BelugaPool {
     }
 
     // ========================================================
-    // MINT FUNCTION (For Factory Integration)
+    // MINT FUNCTION
     // ========================================================
     
     /// Mint liquidity - used by Factory during pool creation
     /// 
-    /// IMPORTANT: Assumes tokens are ALREADY transferred to pool!
-    /// This is called by Factory after it transfers tokens.
+    /// IMPORTANT: 
+    /// - Only callable by factory!
+    /// - Assumes tokens are ALREADY transferred to pool!
     /// 
     /// # Arguments
     /// * `owner` - Position owner
@@ -430,77 +370,25 @@ impl BelugaPool {
         amount0_desired: i128,
         amount1_desired: i128,
     ) -> i128 {
-        // Note: No require_auth for owner here because Factory calls this
-        // after transferring tokens. Factory already verified creator auth.
+        // [FIX #1 - CRITICAL] Only factory can call mint
+        let config = read_pool_config(&env);
+        config.factory.require_auth();
         
-        let mut state = read_pool_state(&env);
-        
-        let lower_aligned = snap_tick_to_spacing(lower_tick, state.tick_spacing);
-        let upper_aligned = snap_tick_to_spacing(upper_tick, state.tick_spacing);
-        
-        if lower_aligned >= upper_aligned {
-            panic!("{}", ErrorMsg::INVALID_TICK_RANGE);
-        }
-        
-        let liquidity = get_liquidity_for_amounts(
+        // Delegate to internal function (no slippage check for factory mint)
+        let (liquidity, amount0, amount1) = Self::internal_add_liquidity(
             &env,
+            &owner,
+            lower_tick,
+            upper_tick,
             amount0_desired,
             amount1_desired,
-            get_sqrt_ratio_at_tick(lower_aligned),
-            get_sqrt_ratio_at_tick(upper_aligned),
-            state.sqrt_price_x64,
+            0, // no min for factory
+            0, // no min for factory
         );
         
-        if liquidity < MIN_LIQUIDITY {
-            panic!("{}", ErrorMsg::LIQUIDITY_TOO_LOW);
-        }
+        // No transfer - factory already transferred tokens
         
-        // Update ticks
-        belugaswap_tick::update_tick(
-            &env,
-            |e, t| read_tick_info(e, t),
-            |e, t, info| write_tick_info(e, t, info),
-            lower_aligned,
-            state.current_tick,
-            liquidity,
-            state.fee_growth_global_0,
-            state.fee_growth_global_1,
-            false,
-        );
-        
-        belugaswap_tick::update_tick(
-            &env,
-            |e, t| read_tick_info(e, t),
-            |e, t, info| write_tick_info(e, t, info),
-            upper_aligned,
-            state.current_tick,
-            liquidity,
-            state.fee_growth_global_0,
-            state.fee_growth_global_1,
-            true,
-        );
-        
-        // Update pool liquidity if in range
-        if state.current_tick >= lower_aligned && state.current_tick < upper_aligned {
-            state.liquidity = state.liquidity.saturating_add(liquidity);
-        }
-        write_pool_state(&env, &state);
-        
-        // Update position
-        let fee_growth_inside = get_fee_growth_inside_local(
-            &env,
-            lower_aligned,
-            upper_aligned,
-            state.current_tick,
-            state.fee_growth_global_0,
-            state.fee_growth_global_1,
-        );
-        
-        let mut pos = read_position(&env, &owner, lower_aligned, upper_aligned);
-        modify_position(&mut pos, liquidity, fee_growth_inside.0, fee_growth_inside.1);
-        write_position(&env, &owner, lower_aligned, upper_aligned, &pos);
-        
-        emit_add_liquidity(&env, liquidity, amount0_desired, amount1_desired);
+        emit_add_liquidity(&env, liquidity, amount0, amount1);
         
         liquidity
     }
@@ -600,7 +488,7 @@ impl BelugaPool {
     }
     
     // ========================================================
-    // FEE COLLECTION (2 Write Functions)
+    // FEE COLLECTION
     // ========================================================
     
     /// Collect accumulated LP fees
@@ -646,14 +534,18 @@ impl BelugaPool {
         
         write_position(&env, &owner, lower, upper, &pos);
         
+        // [FIX #3] Safe cast with bounds check
+        let transfer0 = safe_u128_to_i128(amount0_capped);
+        let transfer1 = safe_u128_to_i128(amount1_capped);
+        
         // Transfer fees
-        if amount0_capped > 0 {
+        if transfer0 > 0 {
             token::Client::new(&env, &pool.token0)
-                .transfer(&pool_addr, &owner, &(amount0_capped as i128));
+                .transfer(&pool_addr, &owner, &transfer0);
         }
-        if amount1_capped > 0 {
+        if transfer1 > 0 {
             token::Client::new(&env, &pool.token1)
-                .transfer(&pool_addr, &owner, &(amount1_capped as i128));
+                .transfer(&pool_addr, &owner, &transfer1);
         }
         
         emit_collect(&env, amount0_capped, amount1_capped);
@@ -688,24 +580,128 @@ impl BelugaPool {
         
         write_pool_state(&env, &pool);
         
+        // Safe cast with bounds check
+        let transfer0 = safe_u128_to_i128(amount0_capped);
+        let transfer1 = safe_u128_to_i128(amount1_capped);
+        
         // Transfer fees
-        if amount0_capped > 0 {
+        if transfer0 > 0 {
             token::Client::new(&env, &pool.token0)
-                .transfer(&pool_addr, &claimer, &(amount0_capped as i128));
+                .transfer(&pool_addr, &claimer, &transfer0);
         }
-        if amount1_capped > 0 {
+        if transfer1 > 0 {
             token::Client::new(&env, &pool.token1)
-                .transfer(&pool_addr, &claimer, &(amount1_capped as i128));
+                .transfer(&pool_addr, &claimer, &transfer1);
         }
         
         emit_claim_creator_fees(&env, amount0_capped, amount1_capped);
         
         (amount0_capped, amount1_capped)
     }
+    
+    // ========================================================
+    // INTERNAL HELPERS
+    // ========================================================
+    
+    /// [FIX #6] Shared internal logic for add_liquidity and mint
+    fn internal_add_liquidity(
+        env: &Env,
+        owner: &Address,
+        lower_tick: i32,
+        upper_tick: i32,
+        amount0_desired: i128,
+        amount1_desired: i128,
+        amount0_min: i128,
+        amount1_min: i128,
+    ) -> (i128, i128, i128) {
+        let mut state = read_pool_state(env);
+        
+        let lower_aligned = snap_tick_to_spacing(lower_tick, state.tick_spacing);
+        let upper_aligned = snap_tick_to_spacing(upper_tick, state.tick_spacing);
+        
+        if lower_aligned >= upper_aligned {
+            panic!("{}", ErrorMsg::INVALID_TICK_RANGE);
+        }
+        
+        let liquidity = get_liquidity_for_amounts(
+            env,
+            amount0_desired,
+            amount1_desired,
+            get_sqrt_ratio_at_tick(lower_aligned),
+            get_sqrt_ratio_at_tick(upper_aligned),
+            state.sqrt_price_x64,
+        );
+        
+        if liquidity < MIN_LIQUIDITY {
+            panic!("{}", ErrorMsg::LIQUIDITY_TOO_LOW);
+        }
+        
+        let (amount0, amount1) = get_amounts_for_liquidity(
+            env,
+            liquidity,
+            get_sqrt_ratio_at_tick(lower_aligned),
+            get_sqrt_ratio_at_tick(upper_aligned),
+            state.sqrt_price_x64,
+        );
+        
+        // Slippage check (skip if min = 0, e.g., factory mint)
+        if amount0_min > 0 || amount1_min > 0 {
+            if amount0 < amount0_min || amount1 < amount1_min {
+                panic!("{}", ErrorMsg::SLIPPAGE_EXCEEDED);
+            }
+        }
+        
+        // Update ticks
+        belugaswap_tick::update_tick(
+            env,
+            |e, t| read_tick_info(e, t),
+            |e, t, info| write_tick_info(e, t, info),
+            lower_aligned,
+            state.current_tick,
+            liquidity,
+            state.fee_growth_global_0,
+            state.fee_growth_global_1,
+            false,
+        );
+        
+        belugaswap_tick::update_tick(
+            env,
+            |e, t| read_tick_info(e, t),
+            |e, t, info| write_tick_info(e, t, info),
+            upper_aligned,
+            state.current_tick,
+            liquidity,
+            state.fee_growth_global_0,
+            state.fee_growth_global_1,
+            true,
+        );
+        
+        // Update pool liquidity if in range
+        if state.current_tick >= lower_aligned && state.current_tick < upper_aligned {
+            state.liquidity = state.liquidity.saturating_add(liquidity);
+        }
+        write_pool_state(env, &state);
+        
+        // Update position
+        let fee_growth_inside = get_fee_growth_inside_local(
+            env,
+            lower_aligned,
+            upper_aligned,
+            state.current_tick,
+            state.fee_growth_global_0,
+            state.fee_growth_global_1,
+        );
+        
+        let mut pos = read_position(env, owner, lower_aligned, upper_aligned);
+        modify_position(&mut pos, liquidity, fee_growth_inside.0, fee_growth_inside.1);
+        write_position(env, owner, lower_aligned, upper_aligned, &pos);
+        
+        (liquidity, amount0, amount1)
+    }
 }
 
 // ========================================================
-// HELPER FUNCTIONS (Internal)
+// HELPER FUNCTIONS
 // ========================================================
 
 fn get_fee_growth_inside_local(
@@ -725,4 +721,15 @@ fn get_fee_growth_inside_local(
         fee_growth_global_0,
         fee_growth_global_1,
     )
+}
+
+/// Safe conversion from u128 to i128
+/// Returns i128::MAX if value exceeds i128 range
+#[inline]
+fn safe_u128_to_i128(value: u128) -> i128 {
+    if value > i128::MAX as u128 {
+        i128::MAX
+    } else {
+        value as i128
+    }
 }

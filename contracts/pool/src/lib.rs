@@ -1,6 +1,6 @@
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, token, Address, Env, Symbol};
+use soroban_sdk::{contract, contractimpl, token, vec, Address, Env, IntoVal, Symbol};
 
 // External packages
 use belugaswap_math::{
@@ -84,7 +84,7 @@ impl BelugaPool {
     }
     
     // ========================================================
-    // VIEW FUNCTIONS
+    // VIEW FUNCTIONS 
     // ========================================================
     
     /// Check if pool is initialized
@@ -229,7 +229,7 @@ impl BelugaPool {
     ) -> SwapResult {
         sender.require_auth();
         
-        // [FIX #4] Validate amount_in early
+        // Validate amount_in early
         if amount_in <= 0 {
             panic!("amount_in must be positive");
         }
@@ -244,6 +244,9 @@ impl BelugaPool {
         } else {
             panic!("{}", ErrorMsg::INVALID_TOKEN);
         };
+        
+        // Check if creator fee is still active
+        let creator_fee_bps = Self::get_active_creator_fee_bps(&env, &config);
         
         let mut swap_state = SwapState {
             sqrt_price_x64: pool_state.sqrt_price_x64,
@@ -264,7 +267,7 @@ impl BelugaPool {
             zero_for_one,
             sqrt_price_limit_x64,
             config.fee_bps as i128,
-            config.creator_fee_bps as i128,
+            creator_fee_bps,  // 0 if revoked, otherwise config value
         );
         
         if amount_out < amount_out_min {
@@ -301,7 +304,7 @@ impl BelugaPool {
     }
     
     // ========================================================
-    // LIQUIDITY FUNCTIONS (2 Write Functions)
+    // LIQUIDITY FUNCTIONS
     // ========================================================
     
     /// Add liquidity to a position
@@ -344,7 +347,7 @@ impl BelugaPool {
     }
 
     // ========================================================
-    // MINT FUNCTION
+    // MINT FUNCTION (For Factory Integration)
     // ========================================================
     
     /// Mint liquidity - used by Factory during pool creation
@@ -534,7 +537,7 @@ impl BelugaPool {
         
         write_position(&env, &owner, lower, upper, &pos);
         
-        // [FIX #3] Safe cast with bounds check
+        // Safe cast with bounds check
         let transfer0 = safe_u128_to_i128(amount0_capped);
         let transfer1 = safe_u128_to_i128(amount1_capped);
         
@@ -554,6 +557,9 @@ impl BelugaPool {
     }
     
     /// Claim creator fees
+    /// 
+    /// Note: Creator can claim accumulated fees even after revocation.
+    /// However, no NEW fees will accumulate after revocation.
     pub fn claim_creator_fees(env: Env, claimer: Address) -> (u128, u128) {
         claimer.require_auth();
         
@@ -603,7 +609,7 @@ impl BelugaPool {
     // INTERNAL HELPERS
     // ========================================================
     
-    /// [FIX #6] Shared internal logic for add_liquidity and mint
+    /// Shared internal logic for add_liquidity and mint
     fn internal_add_liquidity(
         env: &Env,
         owner: &Address,
@@ -697,6 +703,29 @@ impl BelugaPool {
         write_position(env, owner, lower_aligned, upper_aligned, &pos);
         
         (liquidity, amount0, amount1)
+    }
+    
+    /// Check if creator fee is still active by querying factory
+    /// Returns 0 if revoked, otherwise returns config.creator_fee_bps
+    fn get_active_creator_fee_bps(env: &Env, config: &PoolConfig) -> i128 {
+        let pool_addr = env.current_contract_address();
+        
+        // Query factory: is_creator_fee_active(pool, creator) -> bool
+        let is_active: bool = env.invoke_contract(
+            &config.factory,
+            &Symbol::new(env, "is_creator_fee_active"),
+            vec![
+                env,
+                pool_addr.into_val(env),
+                config.creator.clone().into_val(env),
+            ],
+        );
+        
+        if is_active {
+            config.creator_fee_bps as i128
+        } else {
+            0 // Creator fee revoked - no more fees for creator
+        }
     }
 }
 

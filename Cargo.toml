@@ -2,16 +2,17 @@
 resolver = "2"
 
 members = [
+    "contracts/factory",
+    "contracts/pool",
+    "contracts/router",
     "packages/math",
     "packages/tick",
-    "packages/position",
     "packages/swap",
-    "contracts/pool",
-    "contracts/factory",
+    "packages/position",
 ]
 
 [workspace.dependencies]
-soroban-sdk = "21.7.5"
+soroban-sdk = "22.0.0"
 
 [profile.release]
 opt-level = "z"

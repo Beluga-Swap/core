@@ -1,9 +1,8 @@
-// Swap Engine - Fixed for package structure
-
 use soroban_sdk::{Env, Symbol};
 use belugaswap_math::{
     constants::{MAX_SLIPPAGE_BPS, MAX_SWAP_ITERATIONS, MIN_OUTPUT_AMOUNT, MIN_SWAP_AMOUNT},
     compute_swap_step_with_target, div_q64, get_sqrt_ratio_at_tick,
+    mul_div,
 };
 use belugaswap_tick::TickInfo;
 
@@ -13,7 +12,7 @@ use belugaswap_tick::TickInfo;
 
 /// Swap state passed from contract
 /// Contains the minimal pool state needed for swap calculations
-#[derive(Clone)]  // <-- ADDED: needed for quote_swap simulation
+#[derive(Clone)]
 pub struct SwapState {
     pub sqrt_price_x64: u128,
     pub current_tick: i32,
@@ -83,8 +82,8 @@ where
         sqrt_price_limit_x64,
         fee_bps,
         creator_fee_bps,
-        true,  // allow_panic
-        false, // dry_run
+        true,  
+        false, 
     )
 }
 
@@ -115,15 +114,15 @@ where
         env,
         &mut sim_state,
         read_tick,
-        |_, _, _| {}, // no-op write
-        |_, _, _| {}, // no-op emit
+        |_, _, _| {},
+        |_, _, _| {}, 
         amount_in,
         zero_for_one,
         sqrt_price_limit_x64,
         fee_bps,
-        0,     // No creator fee for quotes
-        false, // don't panic
-        true,  // dry_run
+        0,    
+        false, 
+        true, 
     );
 
     (amount_in_used, amount_out, sim_state.sqrt_price_x64)
@@ -133,6 +132,15 @@ where
 /// 
 /// # Returns
 /// `Ok((amount_in_used, amount_out, fee_paid, final_price))` or `Err(Symbol)`
+/// 
+/// # Fee Calculation
+/// fee_paid = amount_in_used * fee_bps / 10000
+/// This is calculated in input token units (correct)
+/// 
+/// # Price Impact Calculation
+/// price_impact = (expected_out - actual_out) / expected_out * 10000
+/// Where expected_out is calculated from spot price before swap
+/// Both values are in output token units (apples to apples)
 pub fn validate_and_preview_swap<F>(
     env: &Env,
     state: &SwapState,
@@ -156,38 +164,114 @@ where
         return Err(Symbol::new(env, "NO_LIQ"));
     }
 
-    // Get quote
+    // Calculate expected output at spot price (before swap)
+    // This gives us the "ideal" output without any price impact
+    let expected_out = calculate_expected_output(
+        state.sqrt_price_x64,
+        amount_in,
+        zero_for_one,
+        fee_bps,
+    );
+
+    // Get actual quote (includes price impact from moving through ticks)
     let (amount_in_used, amount_out, final_price) =
         quote_swap(env, state, read_tick, amount_in, zero_for_one, sqrt_price_limit_x64, fee_bps);
 
-    // Check slippage
+    // Check slippage against user's minimum
     if amount_out < min_amount_out {
         return Err(Symbol::new(env, "SLIP_HI"));
     }
 
-    // Check minimum output
+    // Check minimum output (dust protection)
     if amount_out < MIN_OUTPUT_AMOUNT {
         return Err(Symbol::new(env, "OUT_DUST"));
     }
 
-    // Calculate fee paid
-    let fee_paid = amount_in_used.saturating_sub(amount_out);
+    // Calculate fee paid in INPUT token units
+    // fee_paid = amount_in_used * fee_bps / 10000
+    let fee_paid = amount_in_used
+        .saturating_mul(fee_bps)
+        .saturating_div(10000);
 
-    // Calculate slippage in basis points
-    let slippage_bps = if amount_in_used > 0 {
-        (amount_in.saturating_sub(amount_out))
+    // Calculate price impact in basis points
+    // price_impact = (expected_out - actual_out) / expected_out * 10000
+    // Both are in OUTPUT token units (apples to apples)
+    let price_impact_bps = if expected_out > 0 && expected_out > amount_out {
+        (expected_out.saturating_sub(amount_out))
             .saturating_mul(10000)
-            .saturating_div(amount_in)
+            .saturating_div(expected_out)
     } else {
-        0
+        0 // No impact or positive impact (unlikely but possible with rounding)
     };
 
-    // Check maximum slippage
-    if slippage_bps > MAX_SLIPPAGE_BPS {
+    // Check maximum price impact
+    if price_impact_bps > MAX_SLIPPAGE_BPS {
         return Err(Symbol::new(env, "SLIP_MAX"));
     }
 
     Ok((amount_in_used, amount_out, fee_paid, final_price))
+}
+
+/// Calculate expected output at current spot price (no price impact)
+/// 
+/// This is used to measure price impact by comparing with actual output.
+/// 
+/// Formula for token0 -> token1 (zero_for_one = true):
+///   price = (sqrt_price_x64 / 2^64)^2
+///   output = input * price * (1 - fee)
+/// 
+/// Formula for token1 -> token0 (zero_for_one = false):
+///   price = (2^64 / sqrt_price_x64)^2  
+///   output = input * price * (1 - fee)
+fn calculate_expected_output(
+    sqrt_price_x64: u128,
+    amount_in: i128,
+    zero_for_one: bool,
+    fee_bps: i128,
+) -> i128 {
+    if amount_in <= 0 || sqrt_price_x64 == 0 {
+        return 0;
+    }
+
+    let amount_in_u = amount_in as u128;
+    const Q64: u128 = 1u128 << 64;
+    
+    // Calculate amount after fee
+    let fee_multiplier = (10000 - fee_bps) as u128;
+    let amount_after_fee = amount_in_u
+        .saturating_mul(fee_multiplier)
+        .saturating_div(10000);
+
+    // Calculate output based on direction
+    let output = if zero_for_one {
+        // token0 -> token1: multiply by price
+        // output = amount * (sqrt_price / Q64)^2
+        // Simplified: output = amount * sqrt_price^2 / Q64^2
+        let price_squared = sqrt_price_x64.saturating_mul(sqrt_price_x64);
+        amount_after_fee
+            .saturating_mul(price_squared)
+            .saturating_div(Q64)
+            .saturating_div(Q64)
+    } else {
+        // token1 -> token0: divide by price
+        // output = amount / (sqrt_price / Q64)^2
+        // Simplified: output = amount * Q64^2 / sqrt_price^2
+        let price_squared = sqrt_price_x64.saturating_mul(sqrt_price_x64);
+        if price_squared == 0 {
+            return 0;
+        }
+        amount_after_fee
+            .saturating_mul(Q64)
+            .saturating_mul(Q64)
+            .saturating_div(price_squared)
+    };
+
+    // Cap at i128::MAX and return
+    if output > i128::MAX as u128 {
+        i128::MAX
+    } else {
+        output as i128
+    }
 }
 
 // ============================================================
@@ -356,7 +440,7 @@ where
         amount_out_total = amount_out_total.saturating_add(amount_out);
         total_creator_fee = total_creator_fee.saturating_add(creator_fee);
 
-        // Update fee growth global for LP (Uniswap V3 style)
+        // Update fee growth global for LP
         if liquidity > 0 && lp_fee > 0 {
             let fee_u = lp_fee as u128;
             let liq_u = liquidity as u128;

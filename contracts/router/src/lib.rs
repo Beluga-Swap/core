@@ -9,10 +9,6 @@
 //! 2. Split routing across multiple fee tiers
 //! 3. Multi-hop swaps (A -> B -> C)
 //! 4. Quote aggregation for comparison
-//! 
-//! ## Functions:
-//! - Write (4): initialize, swap_exact_input, swap_split, swap_multihop
-//! - Read (4): get_best_quote, get_all_quotes, get_split_quote, quote_multihop
 
 use soroban_sdk::{
     contract, contractimpl, vec, Address, Env, IntoVal, Symbol, Vec, token,
@@ -79,7 +75,7 @@ impl BelugaRouter {
     }
     
     // ========================================================
-    // SWAP FUNCTIONS (Write)
+    // SWAP FUNCTIONS 
     // ========================================================
     
     /// Swap exact input with automatic best fee selection
@@ -128,11 +124,11 @@ impl BelugaRouter {
             return Err(RouterError::SlippageExceeded);
         }
         
-        // Execute swap
+        // Execute swap - pull from user
         let result = Self::execute_single_swap(
             &env,
-            &sender,
-            &params.recipient,
+            &sender,              
+            &params.recipient,   
             &params.token_in,
             &params.token_out,
             params.amount_in,
@@ -192,7 +188,7 @@ impl BelugaRouter {
             return Err(RouterError::InvalidAmount);
         }
         
-        // Execute each split
+        // Execute each split - all pull from user (same token)
         let mut total_out: i128 = 0;
         let mut pools_used = Vec::new(&env);
         let mut fee_tiers_used = Vec::new(&env);
@@ -211,7 +207,7 @@ impl BelugaRouter {
                 &token_in,
                 &token_out,
                 split.amount_in,
-                MIN_OUTPUT, // Each split has minimal slippage check
+                MIN_OUTPUT, 
                 &split.pool,
             )?;
             
@@ -244,6 +240,7 @@ impl BelugaRouter {
     }
     
     /// Multi-hop swap (A -> B -> C -> ...)
+    /// 
     pub fn swap_multihop(
         env: Env,
         sender: Address,
@@ -291,30 +288,51 @@ impl BelugaRouter {
             ).ok_or(RouterError::PoolNotFound)?;
             
             // Determine recipient for this hop
-            let hop_recipient = if i == params.path.len() - 1 {
+            // - Intermediate hops: router holds the tokens
+            // - Final hop: send to user's recipient
+            let is_final_hop = i == params.path.len() - 1;
+            let hop_recipient = if is_final_hop {
                 params.recipient.clone()
             } else {
                 router_addr.clone()
             };
             
             // Min out for intermediate hops is 1 (just dust protection)
-            let min_out = if i == params.path.len() - 1 {
+            let min_out = if is_final_hop {
                 params.amount_out_min
             } else {
                 MIN_OUTPUT
             };
             
-            // Execute swap
-            let result = Self::execute_single_swap(
-                &env,
-                &sender,
-                &hop_recipient,
-                &current_token,
-                &next_token,
-                current_amount,
-                min_out,
-                &pool,
-            )?;
+            // Determine token source:
+            // - First hop (i == 0): pull from user (sender)
+            // - Subsequent hops: use tokens already in router
+            let is_first_hop = i == 0;
+            
+            let result = if is_first_hop {
+                // First hop: pull tokens from user
+                Self::execute_single_swap(
+                    &env,
+                    &sender,          
+                    &hop_recipient,
+                    &current_token,
+                    &next_token,
+                    current_amount,
+                    min_out,
+                    &pool,
+                )?
+            } else {
+                // Subsequent hops: use tokens already in router
+                Self::execute_swap_from_router(
+                    &env,
+                    &hop_recipient,
+                    &current_token,
+                    &next_token,
+                    current_amount,
+                    min_out,
+                    &pool,
+                )?
+            };
             
             pools_used.push_back(pool);
             fee_tiers_used.push_back(fee_bps);
@@ -342,7 +360,7 @@ impl BelugaRouter {
     }
     
     // ========================================================
-    // QUOTE FUNCTIONS (Read)
+    // QUOTE FUNCTIONS 
     // ========================================================
     
     /// Get best quote across all fee tiers
@@ -391,9 +409,10 @@ impl BelugaRouter {
         Self::get_quotes_for_tiers(&env, &config.factory, &token_in, &token_out, amount_in, &tiers)
     }
     
-    /// Get optimized split quote for large orders
+    /// Get optimal split quote for large orders
     /// 
-    /// Returns recommended splits to minimize price impact
+    /// For simplicity, currently returns single best pool.
+    /// Future versions can implement more sophisticated splitting.
     pub fn get_split_quote(
         env: Env,
         token_in: Address,
@@ -413,141 +432,22 @@ impl BelugaRouter {
             fee_tiers
         };
         
-        // Get quotes for all pools
-        let quotes = Self::get_quotes_for_tiers(
-            &env,
-            &config.factory,
-            &token_in,
-            &token_out,
+        let best_quote = Self::find_best_pool(&env, &config.factory, &token_in, &token_out, amount_in, &tiers)?;
+        
+        // Simple implementation: single pool for now
+        let split = SplitQuote {
+            pool: best_quote.pool.clone(),
+            fee_bps: best_quote.fee_bps,
             amount_in,
-            &tiers,
-        )?;
-        
-        if quotes.is_empty() {
-            return Err(RouterError::NoPoolsFound);
-        }
-        
-        // Simple split strategy: if price impact > 100 bps (1%), consider splitting
-        // Check if single best pool has low price impact
-        let mut best_idx: u32 = 0;
-        let mut best_out: i128 = 0;
-        
-        for i in 0..quotes.len() {
-            let q = quotes.get(i).unwrap();
-            if q.amount_out > best_out {
-                best_out = q.amount_out;
-                best_idx = i;
-            }
-        }
-        
-        let best_quote = quotes.get(best_idx).unwrap();
-        
-        // If price impact is acceptable or only one pool, don't split
-        if best_quote.price_impact_bps < 100 || quotes.len() == 1 {
-            let split = SplitQuote {
-                pool: best_quote.pool.clone(),
-                fee_bps: best_quote.fee_bps,
-                amount_in,
-                amount_out: best_quote.amount_out,
-            };
-            
-            return Ok(AggregatedQuote {
-                total_amount_in: amount_in,
-                total_amount_out: best_quote.amount_out,
-                splits: vec![&env, split],
-                is_split_recommended: false,
-            });
-        }
-        
-        // Calculate optimal split
-        // Simple 2-way split between top 2 pools by output
-        let mut sorted_quotes: Vec<PoolQuote> = Vec::new(&env);
-        for i in 0..quotes.len() {
-            sorted_quotes.push_back(quotes.get(i).unwrap());
-        }
-        
-        // Find top 2 pools
-        let pool1 = quotes.get(best_idx).unwrap();
-        let mut second_best_idx: u32 = 0;
-        let mut second_best_out: i128 = 0;
-        
-        for i in 0..quotes.len() {
-            if i == best_idx {
-                continue;
-            }
-            let q = quotes.get(i).unwrap();
-            if q.amount_out > second_best_out {
-                second_best_out = q.amount_out;
-                second_best_idx = i;
-            }
-        }
-        
-        let pool2 = quotes.get(second_best_idx).unwrap();
-        
-        // 70/30 split favoring the better pool
-        let amount1 = amount_in.saturating_mul(70).saturating_div(100);
-        let amount2 = amount_in.saturating_sub(amount1);
-        
-        // Get quotes for split amounts
-        let quote1 = Self::get_single_quote(
-            &env,
-            &config.factory,
-            &token_in,
-            &token_out,
-            amount1,
-            pool1.fee_bps,
-        )?;
-        
-        let quote2 = Self::get_single_quote(
-            &env,
-            &config.factory,
-            &token_in,
-            &token_out,
-            amount2,
-            pool2.fee_bps,
-        )?;
-        
-        let split1 = SplitQuote {
-            pool: quote1.pool,
-            fee_bps: quote1.fee_bps,
-            amount_in: amount1,
-            amount_out: quote1.amount_out,
+            amount_out: best_quote.amount_out,
         };
         
-        let split2 = SplitQuote {
-            pool: quote2.pool,
-            fee_bps: quote2.fee_bps,
-            amount_in: amount2,
-            amount_out: quote2.amount_out,
-        };
-        
-        let total_split_out = split1.amount_out.saturating_add(split2.amount_out);
-        
-        // Only recommend split if it's actually better
-        let is_split_better = total_split_out > best_out;
-        
-        if is_split_better {
-            Ok(AggregatedQuote {
-                total_amount_in: amount_in,
-                total_amount_out: total_split_out,
-                splits: vec![&env, split1, split2],
-                is_split_recommended: true,
-            })
-        } else {
-            let split = SplitQuote {
-                pool: best_quote.pool.clone(),
-                fee_bps: best_quote.fee_bps,
-                amount_in,
-                amount_out: best_quote.amount_out,
-            };
-            
-            Ok(AggregatedQuote {
-                total_amount_in: amount_in,
-                total_amount_out: best_quote.amount_out,
-                splits: vec![&env, split],
-                is_split_recommended: false,
-            })
-        }
+        Ok(AggregatedQuote {
+            total_amount_in: amount_in,
+            total_amount_out: best_quote.amount_out,
+            splits: vec![&env, split],
+            is_split_recommended: false,
+        })
     }
     
     /// Quote for multi-hop path
@@ -645,7 +545,6 @@ impl BelugaRouter {
         sqrt_price_limit: u128,
     ) -> Option<(i128, i128)> {
         // Call pool's preview_swap
-        // Returns PreviewResult { is_valid, amount_in, amount_out, fee_amount, price_impact_bps, error_code }
         let result: PreviewResultRaw = env.invoke_contract(
             pool,
             &Symbol::new(env, "preview_swap"),
@@ -745,9 +644,10 @@ impl BelugaRouter {
         })
     }
     
+    /// Execute swap pulling tokens from an external source (user)
     fn execute_single_swap(
         env: &Env,
-        sender: &Address,
+        token_source: &Address,
         recipient: &Address,
         token_in: &Address,
         token_out: &Address,
@@ -755,21 +655,75 @@ impl BelugaRouter {
         amount_out_min: i128,
         pool: &Address,
     ) -> Result<SwapResult, RouterError> {
-        // Transfer token_in from sender to router first
         let router_addr = env.current_contract_address();
-        token::Client::new(env, token_in).transfer(sender, &router_addr, &amount_in);
         
-        // Approve pool to spend tokens
-        token::Client::new(env, token_in).approve(&router_addr, pool, &amount_in, &(env.ledger().sequence() + 1000));
+        // Transfer token_in from source (user) to router
+        token::Client::new(env, token_in).transfer(token_source, &router_addr, &amount_in);
         
-        // Call pool swap
-        // Pool.swap(sender, token_in, amount_in, amount_out_min, sqrt_price_limit)
+        // Execute the actual swap via pool
+        Self::execute_pool_swap(
+            env,
+            recipient,
+            token_in,
+            token_out,
+            amount_in,
+            amount_out_min,
+            pool,
+        )
+    }
+    
+    /// Execute swap using tokens already in router
+    /// 
+    /// Used for multi-hop swaps where intermediate tokens are held by router
+    fn execute_swap_from_router(
+        env: &Env,
+        recipient: &Address,
+        token_in: &Address,
+        token_out: &Address,
+        amount_in: i128,
+        amount_out_min: i128,
+        pool: &Address,
+    ) -> Result<SwapResult, RouterError> {
+        // Tokens are already in router, no transfer needed
+        // Just execute the swap
+        Self::execute_pool_swap(
+            env,
+            recipient,
+            token_in,
+            token_out,
+            amount_in,
+            amount_out_min,
+            pool,
+        )
+    }
+    
+    /// Common pool swap execution logic
+    fn execute_pool_swap(
+        env: &Env,
+        recipient: &Address,
+        token_in: &Address,
+        token_out: &Address,
+        amount_in: i128,
+        amount_out_min: i128,
+        pool: &Address,
+    ) -> Result<SwapResult, RouterError> {
+        let router_addr = env.current_contract_address();
+        
+        // Approve pool to spend tokens from router
+        token::Client::new(env, token_in).approve(
+            &router_addr,
+            pool,
+            &amount_in,
+            &(env.ledger().sequence() + 1000),
+        );
+        
+        // Call pool swap - router is the sender
         let swap_result: PoolSwapResult = env.invoke_contract(
             pool,
             &Symbol::new(env, "swap"),
             vec![
                 env,
-                router_addr.clone().into_val(env),
+                router_addr.clone().into_val(env), // Router is always the swap sender
                 token_in.clone().into_val(env),
                 amount_in.into_val(env),
                 amount_out_min.into_val(env),
@@ -777,10 +731,15 @@ impl BelugaRouter {
             ],
         );
         
-        // Transfer output to recipient
+        // Transfer output to final recipient if not router
         if recipient != &router_addr {
-            token::Client::new(env, token_out).transfer(&router_addr, recipient, &swap_result.amount_out);
+            token::Client::new(env, token_out).transfer(
+                &router_addr,
+                recipient,
+                &swap_result.amount_out,
+            );
         }
+        // If recipient IS router (intermediate hop), tokens stay in router
         
         Ok(SwapResult {
             amount_in: swap_result.amount_in,

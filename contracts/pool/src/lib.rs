@@ -32,7 +32,6 @@ impl BelugaPool {
     // ========================================================
     
     /// Initialize pool
-    /// 
     /// # Arguments
     /// * `factory` - Factory contract address (MUST be a contract, not EOA)
     /// * `creator` - Pool creator address
@@ -258,7 +257,7 @@ impl BelugaPool {
             panic!("{}", ErrorMsg::INVALID_TOKEN);
         };
         
-        // Safe creator fee check - won't panic if factory call fails
+        // [FIX] Safe creator fee check - won't panic if factory call fails
         let creator_fee_bps = Self::get_active_creator_fee_bps_safe(&env, &config);
         
         let mut swap_state = SwapState {
@@ -364,7 +363,6 @@ impl BelugaPool {
     // ========================================================
     
     /// Mint liquidity - used by Factory during pool creation
-    /// 
     /// # Arguments
     /// * `owner` - Position owner
     /// * `lower_tick` - Lower tick boundary
@@ -384,10 +382,10 @@ impl BelugaPool {
     ) -> i128 {
         let config = read_pool_config(&env);
         
-        // Only factory can call mint
+        // [FIX #1] Only factory can call mint
         config.factory.require_auth();
         
-        // Verify tokens are actually in pool
+        // [FIX #2] Verify tokens are actually in pool
         let state = read_pool_state(&env);
         let pool_addr = env.current_contract_address();
         
@@ -407,8 +405,8 @@ impl BelugaPool {
             upper_tick,
             amount0_desired,
             amount1_desired,
-            0, 
-            0, 
+            0, // no min for factory
+            0, // no min for factory
         );
         
         // No transfer - factory already transferred tokens
@@ -419,7 +417,6 @@ impl BelugaPool {
     }
     
     /// Remove liquidity from a position
-
     pub fn remove_liquidity(
         env: Env,
         owner: Address,
@@ -741,12 +738,7 @@ impl BelugaPool {
     /// - Owner is the pool creator AND
     /// - Position matches locked position (same ticks) AND
     /// - Lock is still active (not unlocked and not expired)
-    /// 
-    /// Returns false if:
-    /// - Factory call fails (graceful degradation)
-    /// - Owner is not creator
-    /// - Position is not the locked one
-    /// - Lock has been unlocked
+ 
     fn is_position_locked(
         env: &Env,
         config: &PoolConfig,
@@ -776,14 +768,11 @@ impl BelugaPool {
         
         match result {
             Ok(Ok(is_locked)) => is_locked,
-            _ => false, // Factory call failed - allow withdrawal (graceful degradation)
+            _ => true,
         }
     }
     
-    /// [FIX] Safe version - returns 0 if factory call fails (prevents DoS)
-    /// 
-    /// This prevents swap DoS if factory address is invalid or
-    /// doesn't have the is_creator_fee_active function
+    /// [Safe version - returns 0 if factory call fails
     fn get_active_creator_fee_bps_safe(env: &Env, config: &PoolConfig) -> i128 {
         let pool_addr = env.current_contract_address();
         

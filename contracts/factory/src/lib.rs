@@ -332,6 +332,51 @@ impl BelugaFactory {
         read_creator_lock(&env, &pool_address, &creator)
     }
     
+    /// Check if creator's liquidity is still locked
+    /// 
+    /// Called by Pool contract during remove_liquidity to enforce lock.
+    /// 
+    /// # Arguments
+    /// * `pool_address` - Pool contract address
+    /// * `creator` - Creator address to check
+    /// * `lower_tick` - Lower tick of position being withdrawn
+    /// * `upper_tick` - Upper tick of position being withdrawn
+    /// 
+    /// # Returns
+    /// * `true` - Position is locked, withdrawal should be blocked
+    /// * `false` - Position is not locked or lock expired, withdrawal allowed
+    pub fn is_liquidity_locked(
+        env: Env,
+        pool_address: Address,
+        creator: Address,
+        lower_tick: i32,
+        upper_tick: i32,
+    ) -> bool {
+        match read_creator_lock(&env, &pool_address, &creator) {
+            Some(lock) => {
+                // Check if this is the locked position
+                if lock.lower_tick != lower_tick || lock.upper_tick != upper_tick {
+                    return false; // Different position, not locked
+                }
+                
+                // Check if already unlocked
+                if lock.is_unlocked {
+                    return false;
+                }
+                
+                // Check if permanent lock
+                if lock.is_permanent {
+                    return true; // Permanently locked
+                }
+                
+                // Check if lock has expired
+                let current_ledger = env.ledger().sequence();
+                current_ledger < lock.lock_end
+            }
+            None => false, // No lock found
+        }
+    }
+    
     /// Check if creator fee is still active (not revoked)
     /// 
     /// This is called by Pool contract during swaps to determine

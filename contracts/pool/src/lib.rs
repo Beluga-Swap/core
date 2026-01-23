@@ -32,9 +32,8 @@ impl BelugaPool {
     // ========================================================
     
     /// Initialize pool
-    /// 
     /// # Arguments
-    /// * `factory` - Factory contract address
+    /// * `factory` - Factory contract address (MUST be a contract, not EOA)
     /// * `creator` - Pool creator address
     /// * `token_a` - First token
     /// * `token_b` - Second token
@@ -45,7 +44,7 @@ impl BelugaPool {
     /// * `tick_spacing` - Tick spacing for this fee tier
     pub fn initialize(
         env: Env,
-        factory: Address,      
+        factory: Address,      // Added factory parameter
         creator: Address,
         token_a: Address,
         token_b: Address,
@@ -81,7 +80,7 @@ impl BelugaPool {
         };
         
         let config = PoolConfig {
-            factory,            
+            factory,              // [FIX] Use factory parameter, NOT creator
             creator,
             token_a,
             token_b,
@@ -366,6 +365,10 @@ impl BelugaPool {
     
     /// Mint liquidity - used by Factory during pool creation
     /// 
+    /// # Security
+    /// - Only callable by factory contract
+    /// - Verifies tokens are actually in pool before minting
+    /// 
     /// # Arguments
     /// * `owner` - Position owner
     /// * `lower_tick` - Lower tick boundary
@@ -408,8 +411,8 @@ impl BelugaPool {
             upper_tick,
             amount0_desired,
             amount1_desired,
-            0,
-            0, 
+            0, // no min for factory
+            0, // no min for factory
         );
         
         // No transfer - factory already transferred tokens
@@ -420,6 +423,9 @@ impl BelugaPool {
     }
     
     /// Remove liquidity from a position
+    /// 
+    /// - Checks factory for creator lock status before allowing withdrawal
+    /// - Creator cannot withdraw locked liquidity until lock expires
     pub fn remove_liquidity(
         env: Env,
         owner: Address,
@@ -429,6 +435,7 @@ impl BelugaPool {
     ) -> (i128, i128) {
         owner.require_auth();
         
+        let config = read_pool_config(&env);
         let mut pool = read_pool_state(&env);
         let pool_addr = env.current_contract_address();
         
@@ -437,6 +444,12 @@ impl BelugaPool {
         
         if liquidity_delta <= 0 {
             panic!("{}", ErrorMsg::INVALID_LIQUIDITY_AMOUNT);
+        }
+        
+        // Check if this position is locked (creator lock enforcement)
+        // Query factory to check if owner has active lock on this position
+        if Self::is_position_locked(&env, &config, &owner, lower, upper) {
+            panic!("position is locked - use factory.unlock_creator_liquidity first");
         }
         
         let (inside_0, inside_1) = get_fee_growth_inside_local(
@@ -728,7 +741,54 @@ impl BelugaPool {
         (liquidity, amount0, amount1)
     }
     
-    /// Safe version - returns 0 if factory call fails
+    /// Check if a position is locked by querying factory
+    /// 
+    /// Returns true if:
+    /// - Owner is the pool creator AND
+    /// - Position matches locked position (same ticks) AND
+    /// - Lock is still active (not unlocked and not expired)
+    /// 
+    /// Returns false if:
+    /// - Factory call fails (graceful degradation)
+    /// - Owner is not creator
+    /// - Position is not the locked one
+    /// - Lock has been unlocked
+    fn is_position_locked(
+        env: &Env,
+        config: &PoolConfig,
+        owner: &Address,
+        lower_tick: i32,
+        upper_tick: i32,
+    ) -> bool {
+        // Only check lock for creator - other LPs are not affected
+        if owner != &config.creator {
+            return false;
+        }
+        
+        let pool_addr = env.current_contract_address();
+        
+        // Query factory: is_liquidity_locked(pool, creator, lower_tick, upper_tick) -> bool
+        let result = env.try_invoke_contract::<bool>(
+            &config.factory,
+            &Symbol::new(env, "is_liquidity_locked"),
+            vec![
+                env,
+                pool_addr.into_val(env),
+                owner.clone().into_val(env),
+                lower_tick.into_val(env),
+                upper_tick.into_val(env),
+            ],
+        );
+        
+        match result {
+            Ok(Ok(is_locked)) => is_locked,
+            _ => false, // Factory call failed - allow withdrawal (graceful degradation)
+        }
+    }
+    
+    /// Safe version - returns 0 if factory call fails 
+    /// 
+
     fn get_active_creator_fee_bps_safe(env: &Env, config: &PoolConfig) -> i128 {
         let pool_addr = env.current_contract_address();
         

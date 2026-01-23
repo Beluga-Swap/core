@@ -32,6 +32,11 @@ impl BelugaPool {
     // ========================================================
     
     /// Initialize pool
+    /// 
+    /// # Security Fix
+    /// - Added `factory` parameter to properly set factory address
+    /// - Factory must authorize the call (proves it's the deployer)
+    /// 
     /// # Arguments
     /// * `factory` - Factory contract address (MUST be a contract, not EOA)
     /// * `creator` - Pool creator address
@@ -44,7 +49,7 @@ impl BelugaPool {
     /// * `tick_spacing` - Tick spacing for this fee tier
     pub fn initialize(
         env: Env,
-        factory: Address,      
+        factory: Address,     
         creator: Address,
         token_a: Address,
         token_b: Address,
@@ -54,6 +59,7 @@ impl BelugaPool {
         current_tick: i32,
         tick_spacing: i32,
     ) {
+        // Factory must authorize (proves caller is factory contract)
         factory.require_auth();
         
         if is_initialized(&env) {
@@ -79,7 +85,7 @@ impl BelugaPool {
         };
         
         let config = PoolConfig {
-            factory,             
+            factory,              
             creator,
             token_a,
             token_b,
@@ -212,14 +218,8 @@ impl BelugaPool {
             sqrt_price_limit_x64,
             config.fee_bps as i128,
         ) {
-            Ok((amount_in_used, amount_out, fee_paid, _final_price)) => {
-                let price_impact_bps = if amount_in > 0 {
-                    (amount_in.saturating_sub(amount_out))
-                        .saturating_mul(10000)
-                        .saturating_div(amount_in)
-                } else {
-                    0
-                };
+            Ok((amount_in_used, amount_out, fee_paid, price_impact_bps, _final_price)) => {
+                // [FIX] Use price_impact_bps from package (correctly calculated)
                 PreviewResult::valid(amount_in_used, amount_out, fee_paid, price_impact_bps)
             }
             Err(error_symbol) => PreviewResult::invalid(error_symbol),
@@ -257,7 +257,7 @@ impl BelugaPool {
             panic!("{}", ErrorMsg::INVALID_TOKEN);
         };
         
-        // [FIX] Safe creator fee check - won't panic if factory call fails
+        // Safe creator fee check - won't panic if factory call fails
         let creator_fee_bps = Self::get_active_creator_fee_bps_safe(&env, &config);
         
         let mut swap_state = SwapState {
@@ -363,6 +363,7 @@ impl BelugaPool {
     // ========================================================
     
     /// Mint liquidity - used by Factory during pool creation
+    /// 
     /// # Arguments
     /// * `owner` - Position owner
     /// * `lower_tick` - Lower tick boundary
@@ -382,10 +383,10 @@ impl BelugaPool {
     ) -> i128 {
         let config = read_pool_config(&env);
         
-        // [FIX #1] Only factory can call mint
+        // Only factory can call mint
         config.factory.require_auth();
         
-        // [FIX #2] Verify tokens are actually in pool
+        // Verify tokens are actually in pool
         let state = read_pool_state(&env);
         let pool_addr = env.current_contract_address();
         
@@ -738,7 +739,6 @@ impl BelugaPool {
     /// - Owner is the pool creator AND
     /// - Position matches locked position (same ticks) AND
     /// - Lock is still active (not unlocked and not expired)
- 
     fn is_position_locked(
         env: &Env,
         config: &PoolConfig,
@@ -772,12 +772,10 @@ impl BelugaPool {
         }
     }
     
-    /// [Safe version - returns 0 if factory call fails
+    /// Safe version - returns 0 if factory call fails 
     fn get_active_creator_fee_bps_safe(env: &Env, config: &PoolConfig) -> i128 {
         let pool_addr = env.current_contract_address();
-        
-        // Try to query factory - if it fails, just return 0 (no creator fee)
-        // This prevents DoS if factory is misconfigured
+
         let result = env.try_invoke_contract::<bool, soroban_sdk::Error>(
             &config.factory,
             &Symbol::new(env, "is_creator_fee_active"),
@@ -795,8 +793,65 @@ impl BelugaPool {
     }
 }
 
-// ========================================================
+// ============================================================
 // HELPER FUNCTIONS
+// ============================================================
+
+/// Calculate expected output at current spot price (no price impact)
+/// 
+/// Used to measure price impact by comparing with actual output.
+/// Both expected and actual are in OUTPUT token units (apples to apples).
+fn calculate_expected_output_at_spot(
+    sqrt_price_x64: u128,
+    amount_in: i128,
+    zero_for_one: bool,
+    fee_bps: u32,
+) -> i128 {
+    if amount_in <= 0 || sqrt_price_x64 == 0 {
+        return 0;
+    }
+
+    let amount_in_u = amount_in as u128;
+    const Q64: u128 = 1u128 << 64;
+    
+    // Calculate amount after fee
+    let fee_multiplier = (10000 - fee_bps) as u128;
+    let amount_after_fee = amount_in_u
+        .saturating_mul(fee_multiplier)
+        .saturating_div(10000);
+
+    // Calculate output based on direction
+    let output = if zero_for_one {
+        // token0 -> token1: multiply by price
+        // output = amount * (sqrt_price / Q64)^2
+        let price_squared = sqrt_price_x64.saturating_mul(sqrt_price_x64);
+        amount_after_fee
+            .saturating_mul(price_squared)
+            .saturating_div(Q64)
+            .saturating_div(Q64)
+    } else {
+        // token1 -> token0: divide by price
+        // output = amount / (sqrt_price / Q64)^2
+        let price_squared = sqrt_price_x64.saturating_mul(sqrt_price_x64);
+        if price_squared == 0 {
+            return 0;
+        }
+        amount_after_fee
+            .saturating_mul(Q64)
+            .saturating_mul(Q64)
+            .saturating_div(price_squared)
+    };
+
+    // Cap at i128::MAX and return
+    if output > i128::MAX as u128 {
+        i128::MAX
+    } else {
+        output as i128
+    }
+}
+
+// ========================================================
+// MORE HELPER FUNCTIONS
 // ========================================================
 
 fn get_fee_growth_inside_local(

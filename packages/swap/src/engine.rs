@@ -114,15 +114,15 @@ where
         env,
         &mut sim_state,
         read_tick,
-        |_, _, _| {},
-        |_, _, _| {}, 
+        |_, _, _| {}, // no-op write
+        |_, _, _| {}, // no-op emit
         amount_in,
         zero_for_one,
         sqrt_price_limit_x64,
         fee_bps,
-        0,    
-        false, 
-        true, 
+        0,     // No creator fee for quotes
+        false, // don't panic
+        true,  // dry_run
     );
 
     (amount_in_used, amount_out, sim_state.sqrt_price_x64)
@@ -131,13 +131,13 @@ where
 /// Validate and preview a swap
 /// 
 /// # Returns
-/// `Ok((amount_in_used, amount_out, fee_paid, final_price))` or `Err(Symbol)`
+/// `Ok((amount_in_used, amount_out, fee_paid, price_impact_bps, final_price))` or `Err(Symbol)`
 /// 
-/// # Fee Calculation
+/// # Fee Calculation 
 /// fee_paid = amount_in_used * fee_bps / 10000
 /// This is calculated in input token units (correct)
-/// 
-/// # Price Impact Calculation
+///
+/// # Price Impact Calculation 
 /// price_impact = (expected_out - actual_out) / expected_out * 10000
 /// Where expected_out is calculated from spot price before swap
 /// Both values are in output token units (apples to apples)
@@ -150,7 +150,7 @@ pub fn validate_and_preview_swap<F>(
     zero_for_one: bool,
     sqrt_price_limit_x64: u128,
     fee_bps: i128,
-) -> Result<(i128, i128, i128, u128), Symbol>
+) -> Result<(i128, i128, i128, i128, u128), Symbol>
 where
     F: Fn(&Env, i32) -> TickInfo + Clone,
 {
@@ -209,7 +209,7 @@ where
         return Err(Symbol::new(env, "SLIP_MAX"));
     }
 
-    Ok((amount_in_used, amount_out, fee_paid, final_price))
+    Ok((amount_in_used, amount_out, fee_paid, price_impact_bps, final_price))
 }
 
 /// Calculate expected output at current spot price (no price impact)
@@ -440,7 +440,7 @@ where
         amount_out_total = amount_out_total.saturating_add(amount_out);
         total_creator_fee = total_creator_fee.saturating_add(creator_fee);
 
-        // Update fee growth global for LP
+        // Update fee growth global for LP (Uniswap V3 style)
         if liquidity > 0 && lp_fee > 0 {
             let fee_u = lp_fee as u128;
             let liq_u = liquidity as u128;

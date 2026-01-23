@@ -48,7 +48,7 @@ pub struct BelugaFactory;
 #[contractimpl]
 impl BelugaFactory {
     // ========================================================
-    // WRITE FUNCTIONS (3)
+    // WRITE FUNCTIONS 
     // ========================================================
     
     /// Initialize factory
@@ -166,6 +166,8 @@ impl BelugaFactory {
         let pool_address = Self::deploy_pool(&env, &config, &token0, &token1, fee_bps);
         
         // === INITIALIZE POOL ===
+        // Send factory address (this contract) as first parameter
+        let factory_address = env.current_contract_address();
         let current_tick = Self::sqrt_price_to_tick(initial_sqrt_price_x64);
         
         let _: () = env.invoke_contract(
@@ -173,6 +175,7 @@ impl BelugaFactory {
             &Symbol::new(&env, "initialize"),
             vec![
                 &env,
+                factory_address.into_val(&env),   
                 creator.clone().into_val(&env),
                 token_a.clone().into_val(&env),
                 token_b.clone().into_val(&env),
@@ -373,7 +376,7 @@ impl BelugaFactory {
     pub fn set_admin(env: Env, new_admin: Address) -> Result<(), FactoryError> {
         let mut config = read_config(&env);
         config.admin.require_auth();
-        new_admin.require_auth();  // [FIX] New admin must also authorize
+        new_admin.require_auth();
         
         emit_admin_updated(&env, &config.admin, &new_admin);
         

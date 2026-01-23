@@ -32,6 +32,7 @@ impl BelugaPool {
     // ========================================================
     
     /// Initialize pool
+    /// 
     /// # Arguments
     /// * `factory` - Factory contract address (MUST be a contract, not EOA)
     /// * `creator` - Pool creator address
@@ -44,7 +45,7 @@ impl BelugaPool {
     /// * `tick_spacing` - Tick spacing for this fee tier
     pub fn initialize(
         env: Env,
-        factory: Address,      // Added factory parameter
+        factory: Address,      
         creator: Address,
         token_a: Address,
         token_b: Address,
@@ -54,7 +55,6 @@ impl BelugaPool {
         current_tick: i32,
         tick_spacing: i32,
     ) {
-        // Factory must authorize (proves caller is factory contract)
         factory.require_auth();
         
         if is_initialized(&env) {
@@ -80,7 +80,7 @@ impl BelugaPool {
         };
         
         let config = PoolConfig {
-            factory,              // [FIX] Use factory parameter, NOT creator
+            factory,             
             creator,
             token_a,
             token_b,
@@ -365,10 +365,6 @@ impl BelugaPool {
     
     /// Mint liquidity - used by Factory during pool creation
     /// 
-    /// # Security
-    /// - Only callable by factory contract
-    /// - Verifies tokens are actually in pool before minting
-    /// 
     /// # Arguments
     /// * `owner` - Position owner
     /// * `lower_tick` - Lower tick boundary
@@ -411,8 +407,8 @@ impl BelugaPool {
             upper_tick,
             amount0_desired,
             amount1_desired,
-            0, // no min for factory
-            0, // no min for factory
+            0, 
+            0, 
         );
         
         // No transfer - factory already transferred tokens
@@ -423,9 +419,7 @@ impl BelugaPool {
     }
     
     /// Remove liquidity from a position
-    /// 
-    /// - Checks factory for creator lock status before allowing withdrawal
-    /// - Creator cannot withdraw locked liquidity until lock expires
+
     pub fn remove_liquidity(
         env: Env,
         owner: Address,
@@ -768,7 +762,7 @@ impl BelugaPool {
         let pool_addr = env.current_contract_address();
         
         // Query factory: is_liquidity_locked(pool, creator, lower_tick, upper_tick) -> bool
-        let result = env.try_invoke_contract::<bool>(
+        let result = env.try_invoke_contract::<bool, soroban_sdk::Error>(
             &config.factory,
             &Symbol::new(env, "is_liquidity_locked"),
             vec![
@@ -786,13 +780,16 @@ impl BelugaPool {
         }
     }
     
-    /// Safe version - returns 0 if factory call fails 
+    /// [FIX] Safe version - returns 0 if factory call fails (prevents DoS)
     /// 
-
+    /// This prevents swap DoS if factory address is invalid or
+    /// doesn't have the is_creator_fee_active function
     fn get_active_creator_fee_bps_safe(env: &Env, config: &PoolConfig) -> i128 {
         let pool_addr = env.current_contract_address();
         
-        let result = env.try_invoke_contract::<bool>(
+        // Try to query factory - if it fails, just return 0 (no creator fee)
+        // This prevents DoS if factory is misconfigured
+        let result = env.try_invoke_contract::<bool, soroban_sdk::Error>(
             &config.factory,
             &Symbol::new(env, "is_creator_fee_active"),
             vec![

@@ -31,8 +31,21 @@ impl BelugaPool {
     // INITIALIZATION
     // ========================================================
     
+    /// Initialize pool
+    /// 
+    /// # Arguments
+    /// * `factory` - Factory contract address
+    /// * `creator` - Pool creator address
+    /// * `token_a` - First token
+    /// * `token_b` - Second token
+    /// * `fee_bps` - Trading fee in basis points
+    /// * `creator_fee_bps` - Creator's share of fees
+    /// * `sqrt_price_x64` - Initial sqrt price
+    /// * `current_tick` - Initial tick
+    /// * `tick_spacing` - Tick spacing for this fee tier
     pub fn initialize(
         env: Env,
+        factory: Address,      
         creator: Address,
         token_a: Address,
         token_b: Address,
@@ -42,7 +55,8 @@ impl BelugaPool {
         current_tick: i32,
         tick_spacing: i32,
     ) {
-        creator.require_auth();
+        // Factory must authorize (proves caller is factory contract)
+        factory.require_auth();
         
         if is_initialized(&env) {
             panic!("{}", ErrorMsg::ALREADY_INITIALIZED);
@@ -67,7 +81,7 @@ impl BelugaPool {
         };
         
         let config = PoolConfig {
-            factory: creator.clone(),
+            factory,            
             creator,
             token_a,
             token_b,
@@ -245,8 +259,8 @@ impl BelugaPool {
             panic!("{}", ErrorMsg::INVALID_TOKEN);
         };
         
-        // Check if creator fee is still active
-        let creator_fee_bps = Self::get_active_creator_fee_bps(&env, &config);
+        // Safe creator fee check - won't panic if factory call fails
+        let creator_fee_bps = Self::get_active_creator_fee_bps_safe(&env, &config);
         
         let mut swap_state = SwapState {
             sqrt_price_x64: pool_state.sqrt_price_x64,
@@ -267,7 +281,7 @@ impl BelugaPool {
             zero_for_one,
             sqrt_price_limit_x64,
             config.fee_bps as i128,
-            creator_fee_bps,  // 0 if revoked, otherwise config value
+            creator_fee_bps,
         );
         
         if amount_out < amount_out_min {
@@ -352,16 +366,12 @@ impl BelugaPool {
     
     /// Mint liquidity - used by Factory during pool creation
     /// 
-    /// IMPORTANT: 
-    /// - Only callable by factory!
-    /// - Assumes tokens are ALREADY transferred to pool!
-    /// 
     /// # Arguments
     /// * `owner` - Position owner
     /// * `lower_tick` - Lower tick boundary
     /// * `upper_tick` - Upper tick boundary
-    /// * `amount0_desired` - Amount of token0 already in pool
-    /// * `amount1_desired` - Amount of token1 already in pool
+    /// * `amount0_desired` - Amount of token0 expected in pool
+    /// * `amount1_desired` - Amount of token1 expected in pool
     /// 
     /// # Returns
     /// Liquidity minted
@@ -373,9 +383,22 @@ impl BelugaPool {
         amount0_desired: i128,
         amount1_desired: i128,
     ) -> i128 {
-        // [FIX #1 - CRITICAL] Only factory can call mint
         let config = read_pool_config(&env);
+        
+        // Only factory can call mint
         config.factory.require_auth();
+        
+        // Verify tokens are actually in pool
+        let state = read_pool_state(&env);
+        let pool_addr = env.current_contract_address();
+        
+        let balance0 = token::Client::new(&env, &state.token0).balance(&pool_addr);
+        let balance1 = token::Client::new(&env, &state.token1).balance(&pool_addr);
+        
+        // Must have at least the desired amounts
+        if balance0 < amount0_desired || balance1 < amount1_desired {
+            panic!("insufficient token balance in pool");
+        }
         
         // Delegate to internal function (no slippage check for factory mint)
         let (liquidity, amount0, amount1) = Self::internal_add_liquidity(
@@ -385,8 +408,8 @@ impl BelugaPool {
             upper_tick,
             amount0_desired,
             amount1_desired,
-            0, // no min for factory
-            0, // no min for factory
+            0,
+            0, 
         );
         
         // No transfer - factory already transferred tokens
@@ -705,13 +728,11 @@ impl BelugaPool {
         (liquidity, amount0, amount1)
     }
     
-    /// Check if creator fee is still active by querying factory
-    /// Returns 0 if revoked, otherwise returns config.creator_fee_bps
-    fn get_active_creator_fee_bps(env: &Env, config: &PoolConfig) -> i128 {
+    /// Safe version - returns 0 if factory call fails
+    fn get_active_creator_fee_bps_safe(env: &Env, config: &PoolConfig) -> i128 {
         let pool_addr = env.current_contract_address();
         
-        // Query factory: is_creator_fee_active(pool, creator) -> bool
-        let is_active: bool = env.invoke_contract(
+        let result = env.try_invoke_contract::<bool>(
             &config.factory,
             &Symbol::new(env, "is_creator_fee_active"),
             vec![
@@ -721,10 +742,9 @@ impl BelugaPool {
             ],
         );
         
-        if is_active {
-            config.creator_fee_bps as i128
-        } else {
-            0 // Creator fee revoked - no more fees for creator
+        match result {
+            Ok(Ok(true)) => config.creator_fee_bps as i128,
+            _ => 0, // Factory call failed or returned false - no creator fee
         }
     }
 }

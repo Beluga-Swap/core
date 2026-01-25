@@ -8,7 +8,7 @@ fn test_initialization_success() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (client, creator, _token_a, _token_b, _) = common::setup_pool(&env);
+    let (client, creator, _factory, _token_a, _token_b) = common::setup_pool(&env);
     
     // Check initialization
     assert!(client.is_initialized());
@@ -37,6 +37,7 @@ fn test_double_initialization() {
     env.mock_all_auths();
     
     let creator = Address::generate(&env);
+    let factory = Address::generate(&env);
     let token_a = common::create_token(&env, &creator);
     let token_b = common::create_token(&env, &creator);
     
@@ -45,6 +46,7 @@ fn test_double_initialization() {
     
     // First init
     client.initialize(
+        &factory,
         &creator,
         &token_a,
         &token_b,
@@ -57,6 +59,7 @@ fn test_double_initialization() {
     
     // Second init should panic
     client.initialize(
+        &factory,
         &creator,
         &token_a,
         &token_b,
@@ -75,6 +78,7 @@ fn test_invalid_fee_zero() {
     env.mock_all_auths();
     
     let creator = Address::generate(&env);
+    let factory = Address::generate(&env);
     let token_a = common::create_token(&env, &creator);
     let token_b = common::create_token(&env, &creator);
     
@@ -82,6 +86,7 @@ fn test_invalid_fee_zero() {
     let client = BelugaPoolClient::new(&env, &pool_id);
     
     client.initialize(
+        &factory,
         &creator,
         &token_a,
         &token_b,
@@ -100,6 +105,7 @@ fn test_invalid_fee_too_high() {
     env.mock_all_auths();
     
     let creator = Address::generate(&env);
+    let factory = Address::generate(&env);
     let token_a = common::create_token(&env, &creator);
     let token_b = common::create_token(&env, &creator);
     
@@ -107,6 +113,7 @@ fn test_invalid_fee_too_high() {
     let client = BelugaPoolClient::new(&env, &pool_id);
     
     client.initialize(
+        &factory,
         &creator,
         &token_a,
         &token_b,
@@ -125,6 +132,7 @@ fn test_invalid_creator_fee_too_low() {
     env.mock_all_auths();
     
     let creator = Address::generate(&env);
+    let factory = Address::generate(&env);
     let token_a = common::create_token(&env, &creator);
     let token_b = common::create_token(&env, &creator);
     
@@ -132,6 +140,7 @@ fn test_invalid_creator_fee_too_low() {
     let client = BelugaPoolClient::new(&env, &pool_id);
     
     client.initialize(
+        &factory,
         &creator,
         &token_a,
         &token_b,
@@ -150,6 +159,7 @@ fn test_invalid_creator_fee_too_high() {
     env.mock_all_auths();
     
     let creator = Address::generate(&env);
+    let factory = Address::generate(&env);
     let token_a = common::create_token(&env, &creator);
     let token_b = common::create_token(&env, &creator);
     
@@ -157,6 +167,7 @@ fn test_invalid_creator_fee_too_high() {
     let client = BelugaPoolClient::new(&env, &pool_id);
     
     client.initialize(
+        &factory,
         &creator,
         &token_a,
         &token_b,
@@ -175,6 +186,7 @@ fn test_invalid_tick_spacing_zero() {
     env.mock_all_auths();
     
     let creator = Address::generate(&env);
+    let factory = Address::generate(&env);
     let token_a = common::create_token(&env, &creator);
     let token_b = common::create_token(&env, &creator);
     
@@ -182,6 +194,7 @@ fn test_invalid_tick_spacing_zero() {
     let client = BelugaPoolClient::new(&env, &pool_id);
     
     client.initialize(
+        &factory,
         &creator,
         &token_a,
         &token_b,
@@ -200,6 +213,7 @@ fn test_invalid_tick_spacing_negative() {
     env.mock_all_auths();
     
     let creator = Address::generate(&env);
+    let factory = Address::generate(&env);
     let token_a = common::create_token(&env, &creator);
     let token_b = common::create_token(&env, &creator);
     
@@ -207,6 +221,7 @@ fn test_invalid_tick_spacing_negative() {
     let client = BelugaPoolClient::new(&env, &pool_id);
     
     client.initialize(
+        &factory,
         &creator,
         &token_a,
         &token_b,
@@ -224,6 +239,7 @@ fn test_token_sorting() {
     env.mock_all_auths();
     
     let creator = Address::generate(&env);
+    let factory = Address::generate(&env);
     let token_a = common::create_token(&env, &creator);
     let token_b = common::create_token(&env, &creator);
     
@@ -232,6 +248,7 @@ fn test_token_sorting() {
     
     // Initialize with tokens (may be in any order)
     client.initialize(
+        &factory,
         &creator,
         &token_a,
         &token_b,

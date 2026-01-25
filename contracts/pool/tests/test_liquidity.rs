@@ -12,7 +12,7 @@ fn test_add_liquidity_invalid_tick_range_equal() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (client, _, _, _, _) = common::setup_pool(&env);
+    let (client, _creator, _factory, _token_a, _token_b) = common::setup_pool(&env);
     let lp = Address::generate(&env);
     
     // Lower tick == Upper tick (invalid)
@@ -33,7 +33,7 @@ fn test_add_liquidity_invalid_tick_range_inverted() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (client, _, _, _, _) = common::setup_pool(&env);
+    let (client, _creator, _factory, _token_a, _token_b) = common::setup_pool(&env);
     let lp = Address::generate(&env);
     
     // Lower tick > Upper tick (invalid)
@@ -54,7 +54,7 @@ fn test_add_liquidity_zero_amounts() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (client, _, _, _, _) = common::setup_pool(&env);
+    let (client, _creator, _factory, _token_a, _token_b) = common::setup_pool(&env);
     let lp = Address::generate(&env);
     
     // Both amounts zero
@@ -75,7 +75,7 @@ fn test_add_liquidity_below_minimum() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (client, _, _, _, _) = common::setup_pool(&env);
+    let (client, _creator, _factory, _token_a, _token_b) = common::setup_pool(&env);
     let lp = Address::generate(&env);
     
     // Amounts too small (below MIN_LIQUIDITY threshold)
@@ -100,7 +100,7 @@ fn test_remove_liquidity_nonexistent_position() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (client, _, _, _, _) = common::setup_pool(&env);
+    let (client, _creator, _factory, _token_a, _token_b) = common::setup_pool(&env);
     let lp = Address::generate(&env);
     
     // Try to remove liquidity from non-existent position
@@ -118,7 +118,7 @@ fn test_remove_liquidity_zero_amount() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (client, _, _, _, _) = common::setup_pool(&env);
+    let (client, _creator, _factory, _token_a, _token_b) = common::setup_pool(&env);
     let lp = Address::generate(&env);
     
     // Try to remove zero liquidity
@@ -139,7 +139,7 @@ fn test_collect_fees_no_position() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (client, _, _, _, _) = common::setup_pool(&env);
+    let (client, _creator, _factory, _token_a, _token_b) = common::setup_pool(&env);
     let lp = Address::generate(&env);
     
     // Collecting from non-existent position should return zero
@@ -158,7 +158,7 @@ fn test_get_position_various_ranges() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (client, _, _, _, _) = common::setup_pool(&env);
+    let (client, _creator, _factory, _token_a, _token_b) = common::setup_pool(&env);
     let lp = Address::generate(&env);
     
     // Query different tick ranges (all should be empty)

@@ -11,6 +11,7 @@ pub const DEFAULT_TICK: i32 = 0;
 /// Setup pool with default parameters
 pub fn setup_pool(env: &Env) -> (BelugaPoolClient<'_>, Address, Address, Address, Address) {
     let creator = Address::generate(env);
+    let factory = Address::generate(env);
     let token_a = create_token(env, &creator);
     let token_b = create_token(env, &creator);
     
@@ -18,6 +19,7 @@ pub fn setup_pool(env: &Env) -> (BelugaPoolClient<'_>, Address, Address, Address
     let client = BelugaPoolClient::new(env, &pool_id);
     
     client.initialize(
+        &factory,
         &creator,
         &token_a,
         &token_b,
@@ -28,8 +30,7 @@ pub fn setup_pool(env: &Env) -> (BelugaPoolClient<'_>, Address, Address, Address
         &DEFAULT_TICK_SPACING,
     );
     
-    let _admin = Address::generate(env);
-    (client, creator, token_a, token_b, _admin)
+    (client, creator, factory, token_a, token_b)
 }
 
 /// Setup pool with custom parameters
@@ -38,10 +39,11 @@ pub fn setup_custom_pool(
     fee_bps: u32,
     creator_fee_bps: u32,
     sqrt_price_x64: u128,
-    tick: i32,
+    current_tick: i32,
     tick_spacing: i32,
 ) -> (BelugaPoolClient<'_>, Address, Address, Address, Address) {
     let creator = Address::generate(env);
+    let factory = Address::generate(env);
     let token_a = create_token(env, &creator);
     let token_b = create_token(env, &creator);
     
@@ -49,18 +51,18 @@ pub fn setup_custom_pool(
     let client = BelugaPoolClient::new(env, &pool_id);
     
     client.initialize(
+        &factory,
         &creator,
         &token_a,
         &token_b,
         &fee_bps,
         &creator_fee_bps,
         &sqrt_price_x64,
-        &tick,
+        &current_tick,
         &tick_spacing,
     );
     
-    let _admin = Address::generate(env);
-    (client, creator, token_a, token_b, _admin)
+    (client, creator, factory, token_a, token_b)
 }
 
 /// Create a test token

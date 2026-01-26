@@ -1,6 +1,7 @@
 # BelugaSwap Factory
 
-Permissionless pool deployment factory contract with creator incentive system for BelugaSwap.
+Permissionless pool deployment factory contract with creator incentive system and router integration.
+
 ---
 
 ## 🏭 Factory Functions
@@ -10,26 +11,46 @@ The factory contract is responsible for:
 ### 1. **Pool Deployment (Atomic)**
 Factory creates new pools in a single atomic transaction that includes:
 - Deploy new pool contract
-- Initialize pool with correct parameters
+- Initialize pool with factory + router addresses
 - Transfer initial tokens from creator
 - Mint first liquidity position
 - Lock creator liquidity
 
-### 2. **Fee Tier Standardization**
-Provides 3 standard fee tiers:
-- **5 bps (0.05%)** - For stablecoins (tick spacing: 10)
-- **30 bps (0.30%)** - For volatile tokens (tick spacing: 60)
-- **100 bps (1.00%)** - For meme/exotic tokens (tick spacing: 200)
+### 2. **Router Registry**
+Links to Router contract for smart swap routing:
+- Must set router before creating pools
+- Router address passed to every pool on creation
+- `is_ready()` returns true only when router is set
 
-### 3. **Duplicate Prevention**
+### 3. **Fee Tier Standardization**
+Provides 3 standard fee tiers:
+| Fee | Bps | Tick Spacing | Use Case |
+|-----|-----|--------------|----------|
+| 0.05% | 5 | 10 | Stablecoins |
+| 0.30% | 30 | 60 | Volatile tokens |
+| 1.00% | 100 | 200 | Meme/Exotic tokens |
+
+### 4. **Duplicate Prevention**
 Prevents duplicate pool deployments for the same token pair with the same fee tier using deterministic addressing.
 
-### 4. **Creator Lock Management**
+### 5. **Creator Lock Management**
 Manages locked liquidity from pool creators with rules:
 - Creator must lock initial LP to earn creator fees
 - Lock can be temporary (min 7 days) or permanent
 - Unlock LP = **REVOKE creator fee PERMANENTLY**
 - LP out of range = temporarily no fees
+
+---
+
+## 🚀 Deployment Flow
+
+```
+1. Deploy Factory    → factory.initialize(admin, pool_wasm_hash)
+2. Deploy Router     → router.initialize(factory, admin)
+3. Link Router       → factory.set_router(router)
+4. Verify Ready      → factory.is_ready() == true
+5. Create Pools      → factory.create_pool(...)
+```
 
 ---
 
@@ -58,12 +79,12 @@ let pool_address = factory.create_pool(&creator, &params);
 
 ### Minimum Requirements
 
-- **Initial Liquidity**: Minimum 0.1 token (1_000_000 with 7 decimals) per token
-- **Lock Duration**: 
-  - 0 = permanent lock
-  - Minimum 120,960 ledgers (~7 days at 5s/ledger)
-- **Creator Fee**: 10-1000 bps (0.1% - 10% of total fees)
-- **Tick Range**: Must be aligned with tick spacing
+| Parameter | Requirement |
+|-----------|-------------|
+| Initial Liquidity | Min 0.1 token (1_000_000 with 7 decimals) per token |
+| Lock Duration | 0 = permanent, or min 120,960 ledgers (~7 days) |
+| Creator Fee | 10-1000 bps (0.1% - 10% of total fees) |
+| Tick Range | Must be aligned with tick spacing |
 
 ### Creator Fee Rules
 
@@ -80,66 +101,9 @@ let pool_address = factory.create_pool(&creator, &params);
 
 ---
 
-## ✅ Pool Verification
-
-### 1. Check if Pool Exists
-
-```rust
-let exists = factory.is_pool_deployed(
-    &token_a,
-    &token_b,
-    &30 // fee_bps
-);
-```
-
-### 2. Get Pool Address
-
-```rust
-let pool_address = factory.get_pool_address(
-    &token_a,
-    &token_b,
-    &30
-);
-
-match pool_address {
-    Some(addr) => println!("Pool exists at: {}", addr),
-    None => println!("Pool not found")
-}
-```
-
-### 3. Verify Creator Lock
-
-```rust
-let lock_info = factory.get_creator_lock(&pool_address, &creator);
-
-match lock_info {
-    Some(lock) => {
-        println!("Liquidity: {}", lock.liquidity);
-        println!("Lock End: {}", lock.lock_end);
-        println!("Is Permanent: {}", lock.is_permanent);
-        println!("Fee Revoked: {}", lock.fee_revoked);
-    }
-    None => println!("No creator lock found")
-}
-```
-
-### 4. List All Pools
-
-```rust
-let total = factory.get_total_pools();
-let all_pools = factory.get_all_pool_addresses();
-
-println!("Total pools: {}", total);
-for pool in all_pools.iter() {
-    println!("Pool: {}", pool);
-}
-```
-
----
-
 ## 📚 Functions
 
-### Write Functions (3)
+### Write Functions
 
 #### `initialize`
 ```rust
@@ -149,14 +113,18 @@ pub fn initialize(
     pool_wasm_hash: BytesN<32>,
 ) -> Result<(), FactoryError>
 ```
-Initialize the factory contract. Can only be called once.
+Initialize the factory contract. Router is set separately after deployment.
 
-**Parameters:**
-- `admin`: Factory admin address
-- `pool_wasm_hash`: WASM hash of pool contract
+---
 
-**Errors:**
-- `AlreadyInitialized`: Factory already initialized
+#### `set_router`
+```rust
+pub fn set_router(
+    env: Env,
+    router: Address,
+) -> Result<(), FactoryError>
+```
+Set router address. **Admin only.** Must be called before creating pools.
 
 ---
 
@@ -168,25 +136,10 @@ pub fn create_pool(
     params: CreatePoolParams,
 ) -> Result<Address, FactoryError>
 ```
-Deploy new pool (atomic: deploy + init + LP + lock).
-
-**Parameters:**
-- `creator`: Creator address providing initial liquidity
-- `params`: Pool creation parameters (see `CreatePoolParams`)
-
-**Returns:** Newly deployed pool address
+Deploy new pool (atomic: deploy + init + LP + lock). Requires router to be set.
 
 **Errors:**
-- `NotInitialized`: Factory not initialized
-- `InvalidTokenPair`: Token A equals token B
-- `PoolAlreadyExists`: Pool for this pair+fee already exists
-- `InvalidFeeTier`: Fee tier invalid or disabled
-- `InvalidTickSpacing`: Tick not aligned with spacing
-- `InvalidTickRange`: Lower tick >= upper tick
-- `InsufficientInitialLiquidity`: Amount below minimum
-- `InvalidLockDuration`: Duration < 7 days (and not 0)
-- `InvalidCreatorFee`: Creator fee outside 0.1%-10% range
-- `InvalidInitialPrice`: sqrt_price_x64 = 0
+- `RouterNotSet`: Router not configured yet
 
 ---
 
@@ -200,21 +153,25 @@ pub fn unlock_creator_liquidity(
 ```
 Unlock creator liquidity. **REVOKES creator fee PERMANENTLY!**
 
-**Parameters:**
-- `pool_address`: Pool address
-- `creator`: Creator address
+---
 
-**Returns:** Amount of liquidity unlocked
+### Read Functions
 
-**Errors:**
-- `CreatorLockNotFound`: Lock not found
-- `NotPoolCreator`: Caller is not pool creator
-- `CreatorFeeRevoked`: Fee already revoked
-- `LiquidityStillLocked`: Lock period not ended yet
+#### `is_ready`
+```rust
+pub fn is_ready(env: Env) -> bool
+```
+Check if factory is ready (initialized + router set).
 
 ---
 
-### Read Functions (6)
+#### `get_router`
+```rust
+pub fn get_router(env: Env) -> Option<Address>
+```
+Get router address.
+
+---
 
 #### `get_pool_address`
 ```rust
@@ -238,7 +195,7 @@ pub fn is_pool_deployed(
     fee_bps: u32
 ) -> bool
 ```
-Check if pool is already deployed for specific pair+fee.
+Check if pool exists for specific pair+fee.
 
 ---
 
@@ -264,15 +221,6 @@ pub fn get_fee_tier(env: Env, fee_bps: u32) -> Option<FeeTier>
 ```
 Get specific fee tier configuration.
 
-**Returns:**
-```rust
-struct FeeTier {
-    fee_bps: u32,
-    tick_spacing: i32,
-    enabled: bool,
-}
-```
-
 ---
 
 #### `get_creator_lock`
@@ -285,32 +233,39 @@ pub fn get_creator_lock(
 ```
 Get creator lock information for a specific pool.
 
-**Returns:**
+---
+
+#### `is_liquidity_locked`
 ```rust
-struct CreatorLock {
-    pool: Address,
+pub fn is_liquidity_locked(
+    env: Env,
+    pool_address: Address,
     creator: Address,
-    liquidity: i128,
     lower_tick: i32,
     upper_tick: i32,
-    lock_start: u32,
-    lock_end: u32,        // u32::MAX = permanent
-    is_permanent: bool,
-    is_unlocked: bool,
-    fee_revoked: bool,    // true = PERMANENT
-}
+) -> bool
 ```
+Check if creator's position is still locked. Called by Pool contract.
 
 ---
 
-### Admin Functions (3)
+#### `is_creator_fee_active`
+```rust
+pub fn is_creator_fee_active(
+    env: Env,
+    pool_address: Address,
+    creator: Address,
+) -> bool
+```
+Check if creator fee is still active. Called by Pool contract during swaps.
+
+---
+
+### Admin Functions
 
 #### `set_pool_wasm_hash`
 ```rust
-pub fn set_pool_wasm_hash(
-    env: Env,
-    new_hash: BytesN<32>
-) -> Result<(), FactoryError>
+pub fn set_pool_wasm_hash(env: Env, new_hash: BytesN<32>) -> Result<(), FactoryError>
 ```
 Update WASM hash for future pool deployments. **Admin only.**
 
@@ -335,48 +290,30 @@ pub fn set_fee_tier(
 ```
 Add/update fee tier configuration. **Admin only.**
 
-**Errors:**
-- `InvalidTickSpacing`: tick_spacing <= 0
-
 ---
 
 ## ⚠️ Error Codes
 
-### Initialization Errors
 | Code | Error | Description |
-|------|-------|-----------|
+|------|-------|-------------|
 | 1 | `AlreadyInitialized` | Factory already initialized |
 | 2 | `NotInitialized` | Factory not initialized yet |
-
-### Pool Creation Errors
-| Code | Error | Description |
-|------|-------|-----------|
-| 10 | `PoolAlreadyExists` | Pool for this pair+fee already exists |
+| 5 | `RouterNotSet` | Router not configured |
+| 6 | `RouterAlreadySet` | Router already configured |
+| 10 | `PoolAlreadyExists` | Pool for this pair+fee exists |
 | 11 | `InvalidTokenPair` | Token A equals token B |
 | 12 | `InvalidFeeTier` | Fee tier invalid/disabled |
-| 13 | `InvalidTickSpacing` | Tick not aligned with spacing |
+| 13 | `InvalidTickSpacing` | Tick not aligned |
 | 14 | `InvalidTickRange` | Lower tick >= upper tick |
 | 15 | `InvalidInitialPrice` | sqrt_price_x64 = 0 |
-| 16 | `InvalidCreatorFee` | Creator fee outside 0.1%-10% |
-
-### Liquidity Errors
-| Code | Error | Description |
-|------|-------|-----------|
+| 16 | `InvalidCreatorFee` | Outside 0.1%-10% range |
 | 20 | `InsufficientInitialLiquidity` | Amount < 0.1 token |
-| 21 | `InvalidLockDuration` | Duration < 7 days (and != 0) |
-| 22 | `LiquidityStillLocked` | Lock period not ended yet |
-
-### Creator Errors
-| Code | Error | Description |
-|------|-------|-----------|
-| 30 | `NotPoolCreator` | Caller is not pool creator |
-| 31 | `CreatorFeeRevoked` | Creator fee already revoked |
+| 21 | `InvalidLockDuration` | Duration < 7 days |
+| 22 | `LiquidityStillLocked` | Lock not expired |
+| 30 | `NotPoolCreator` | Caller not creator |
+| 31 | `CreatorFeeRevoked` | Fee already revoked |
 | 32 | `CreatorLockNotFound` | Lock not found |
-
-### Admin Errors
-| Code | Error | Description |
-|------|-------|-----------|
-| 50 | `Unauthorized` | Caller is not admin |
+| 50 | `Unauthorized` | Caller not admin |
 
 ---
 
@@ -388,142 +325,71 @@ Add/update fee tier configuration. **Admin only.**
 # Install Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
-# Install Soroban CLI
-cargo install --locked soroban-cli
+# Install Stellar CLI (v25+)
+cargo install stellar-cli
 
-# Add wasm32 target
-rustup target add wasm32-unknown-unknown
+# Add WASM target
+rustup target add wasm32v1-none
 ```
 
-### Clone Repository
+### Build
 
 ```bash
-# Clone project
-git clone https://github.com/Beluga-Swap/core.git
-cd core/contracts/factory
+# From project root
+stellar contract build
 
-# Folder structure:
-# factory/
-# ├── src/
-# │   ├── lib.rs
-# │   ├── error.rs
-# │   ├── events.rs
-# │   ├── storage.rs
-# │   └── types.rs
-# ├── Cargo.toml
-# └── README.md
+# Output: target/wasm32v1-none/release/beluga_factory.wasm
 ```
 
-### Build Contract
+### Deploy
 
 ```bash
-# Build contract
-soroban contract build
+# Setup
+export NETWORK="testnet"
+export SOURCE="admin"
+export ADMIN=$(stellar keys address $SOURCE)
 
-# Output: target/wasm32-unknown-unknown/release/belugaswap_factory.wasm
+# Upload Pool WASM first
+export POOL_WASM_HASH=$(stellar contract upload \
+  --wasm target/wasm32v1-none/release/belugaswap_pool.wasm \
+  --source $SOURCE --network $NETWORK)
+
+# Deploy Factory
+export FACTORY=$(stellar contract deploy \
+  --wasm target/wasm32v1-none/release/beluga_factory.wasm \
+  --source $SOURCE --network $NETWORK)
+
+# Initialize
+stellar contract invoke --id $FACTORY --source $SOURCE --network $NETWORK \
+  -- initialize --admin $ADMIN --pool_wasm_hash $POOL_WASM_HASH
+
+# Check (should be false - no router yet)
+stellar contract invoke --id $FACTORY --network $NETWORK -- is_ready
+
+# After deploying router, link it:
+stellar contract invoke --id $FACTORY --source $SOURCE --network $NETWORK \
+  -- set_router --router $ROUTER
+
+# Verify (should be true now)
+stellar contract invoke --id $FACTORY --network $NETWORK -- is_ready
 ```
 
-### Local Testing
+### Create Pool
 
 ```bash
-# Run tests (if available)
-cargo test
-
-# Optimize WASM
-soroban contract optimize \
-  --wasm target/wasm32-unknown-unknown/release/belugaswap_factory.wasm
-```
-
-### Deploy to Testnet
-
-```bash
-# Configure network
-soroban network add \
-  --global testnet \
-  --rpc-url https://soroban-testnet.stellar.org:443 \
-  --network-passphrase "Test SDF Network ; September 2015"
-
-# Generate keypair
-soroban keys generate alice --network testnet
-
-# Get testnet XLM
-# Visit: https://laboratory.stellar.org/#account-creator
-
-# Deploy factory
-FACTORY_ID=$(soroban contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/belugaswap_factory.wasm \
-  --source alice \
-  --network testnet)
-
-echo "Factory deployed at: $FACTORY_ID"
-
-# Deploy pool contract (to be installed in factory)
-POOL_ID=$(soroban contract deploy \
-  --wasm path/to/pool.wasm \
-  --source alice \
-  --network testnet)
-
-# Install pool WASM to factory
-POOL_WASM_HASH=$(soroban contract install \
-  --wasm path/to/pool.wasm \
-  --source alice \
-  --network testnet)
-
-echo "Pool WASM hash: $POOL_WASM_HASH"
-
-# Initialize factory
-soroban contract invoke \
-  --id $FACTORY_ID \
-  --source alice \
-  --network testnet \
-  -- \
-  initialize \
-  --admin GBXXX... \
-  --pool_wasm_hash $POOL_WASM_HASH
-```
-
-### Interact with Factory
-
-```bash
-# Create pool
-soroban contract invoke \
-  --id $FACTORY_ID \
-  --source alice \
-  --network testnet \
-  -- \
-  create_pool \
-  --creator GBXXX... \
-  --params '{
-    "token_a": "CDXXX...",
-    "token_b": "CDYYY...",
+stellar contract invoke --id $FACTORY --source $SOURCE --network $NETWORK \
+  -- create_pool --creator $ADMIN --params '{
+    "token_a": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+    "token_b": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
     "fee_bps": 30,
     "creator_fee_bps": 100,
-    "initial_sqrt_price_x64": "18446744073709551616",
-    "amount0_desired": "1000000000",
-    "amount1_desired": "500000000",
+    "initial_sqrt_price_x64": 18446744073709551616,
+    "amount0_desired": 10000000000,
+    "amount1_desired": 10000000000,
     "lower_tick": -887220,
     "upper_tick": 887220,
     "lock_duration": 0
   }'
-
-# Get pool address
-soroban contract invoke \
-  --id $FACTORY_ID \
-  --network testnet \
-  -- \
-  get_pool_address \
-  --token_a CDXXX... \
-  --token_b CDYYY... \
-  --fee_bps 30
-
-# Check creator lock
-soroban contract invoke \
-  --id $FACTORY_ID \
-  --network testnet \
-  -- \
-  get_creator_lock \
-  --pool_address POOL_ADDRESS \
-  --creator CREATOR_ADDRESS
 ```
 
 ---
@@ -531,8 +397,5 @@ soroban contract invoke \
 ## 🔗 Links
 
 - **Repository**: [github.com/Beluga-Swap/core](https://github.com/Beluga-Swap/core)
-- **Factory Contract**: [contracts/factory](https://github.com/Beluga-Swap/core/tree/main/contracts/factory)
-- **Soroban Docs**: [soroban.stellar.org](https://soroban.stellar.org)
-- **Stellar Laboratory**: [laboratory.stellar.org](https://laboratory.stellar.org)
-
----
+- **Pool Contract**: [contracts/pool](../pool/README.md)
+- **Router Contract**: [contracts/router](../router/README.md)

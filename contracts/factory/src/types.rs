@@ -12,6 +12,7 @@ use soroban_sdk::{contracttype, Address, BytesN};
 pub struct FactoryConfig {
     pub admin: Address,
     pub pool_wasm_hash: BytesN<32>,
+    pub router: Option<Address>,  // Set after router deployment
 }
 
 // ============================================================

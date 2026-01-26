@@ -13,8 +13,10 @@ pub use belugaswap_position::{Position, PositionInfo};
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct PoolConfig {
-    /// Factory that deployed this pool (or creator if deployed directly)
+    /// Factory that deployed this pool
     pub factory: Address,
+    /// Router contract address (for authorized swaps)
+    pub router: Address,
     /// Pool creator address
     pub creator: Address,
     /// First token (original order from creation)

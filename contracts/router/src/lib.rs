@@ -9,6 +9,12 @@
 //! 2. Split routing across multiple fee tiers
 //! 3. Multi-hop swaps (A -> B -> C)
 //! 4. Quote aggregation for comparison
+//!
+//! ## Deployment Flow:
+//! 1. Deploy Factory → factory.initialize()
+//! 2. Deploy Router → router.initialize(factory, admin)
+//! 3. Set router in Factory → factory.set_router(router)
+//! 4. Ready to swap!
 
 use soroban_sdk::{
     contract, contractimpl, vec, Address, Env, IntoVal, Symbol, Vec, token,
@@ -37,6 +43,9 @@ const DEFAULT_FEE_TIERS: [u32; 3] = [5, 30, 100];
 /// Minimum output threshold (dust protection)
 const MIN_OUTPUT: i128 = 1;
 
+/// Approval expiry buffer (minimal - just for the current tx)
+const APPROVAL_LEDGER_BUFFER: u32 = 100;
+
 // ============================================================
 // CONTRACT
 // ============================================================
@@ -51,6 +60,8 @@ impl BelugaRouter {
     // ========================================================
     
     /// Initialize router with factory address
+    /// 
+    /// After initialization, call factory.set_router(router_address)
     pub fn initialize(
         env: Env,
         factory: Address,
@@ -134,6 +145,7 @@ impl BelugaRouter {
             params.amount_in,
             params.amount_out_min,
             &best_quote.pool,
+            best_quote.fee_bps,
         )?;
         
         emit_swap(
@@ -174,18 +186,27 @@ impl BelugaRouter {
         }
         
         if splits.is_empty() {
-            return Err(RouterError::NoPoolsFound);
+            return Err(RouterError::EmptySplits);
         }
         
         // Validate total split amounts
         let mut total_split_in: i128 = 0;
+        let mut valid_splits: u32 = 0;
+        
         for i in 0..splits.len() {
             let split = splits.get(i).unwrap();
-            total_split_in = total_split_in.saturating_add(split.amount_in);
+            if split.amount_in > 0 {
+                total_split_in = total_split_in.saturating_add(split.amount_in);
+                valid_splits += 1;
+            }
         }
         
         if total_split_in != amount_in {
-            return Err(RouterError::InvalidAmount);
+            return Err(RouterError::SplitAmountMismatch);
+        }
+        
+        if valid_splits == 0 {
+            return Err(RouterError::EmptySplits);
         }
         
         // Execute each split - all pull from user (same token)
@@ -196,6 +217,7 @@ impl BelugaRouter {
         for i in 0..splits.len() {
             let split = splits.get(i).unwrap();
             
+            // Skip zero-amount splits
             if split.amount_in <= 0 {
                 continue;
             }
@@ -209,6 +231,7 @@ impl BelugaRouter {
                 split.amount_in,
                 MIN_OUTPUT, 
                 &split.pool,
+                split.fee_bps,
             )?;
             
             total_out = total_out.saturating_add(result.amount_out);
@@ -228,7 +251,7 @@ impl BelugaRouter {
             &token_out,
             amount_in,
             total_out,
-            splits.len(),
+            valid_splits,
         );
         
         Ok(SwapResult {
@@ -240,7 +263,6 @@ impl BelugaRouter {
     }
     
     /// Multi-hop swap (A -> B -> C -> ...)
-    /// 
     pub fn swap_multihop(
         env: Env,
         sender: Address,
@@ -262,6 +284,10 @@ impl BelugaRouter {
         
         if params.path.len() > MAX_HOPS {
             return Err(RouterError::PathTooLong);
+        }
+        
+        if params.amount_in <= 0 {
+            return Err(RouterError::InvalidAmount);
         }
         
         let config = read_config(&env);
@@ -288,8 +314,6 @@ impl BelugaRouter {
             ).ok_or(RouterError::PoolNotFound)?;
             
             // Determine recipient for this hop
-            // - Intermediate hops: router holds the tokens
-            // - Final hop: send to user's recipient
             let is_final_hop = i == params.path.len() - 1;
             let hop_recipient = if is_final_hop {
                 params.recipient.clone()
@@ -297,20 +321,17 @@ impl BelugaRouter {
                 router_addr.clone()
             };
             
-            // Min out for intermediate hops is 1 (just dust protection)
+            // Min out for intermediate hops is 1 (dust protection)
             let min_out = if is_final_hop {
                 params.amount_out_min
             } else {
                 MIN_OUTPUT
             };
             
-            // Determine token source:
-            // - First hop (i == 0): pull from user (sender)
-            // - Subsequent hops: use tokens already in router
+            // First hop: pull from user, subsequent: use router balance
             let is_first_hop = i == 0;
             
             let result = if is_first_hop {
-                // First hop: pull tokens from user
                 Self::execute_single_swap(
                     &env,
                     &sender,          
@@ -320,9 +341,9 @@ impl BelugaRouter {
                     current_amount,
                     min_out,
                     &pool,
+                    fee_bps,
                 )?
             } else {
-                // Subsequent hops: use tokens already in router
                 Self::execute_swap_from_router(
                     &env,
                     &hop_recipient,
@@ -331,6 +352,7 @@ impl BelugaRouter {
                     current_amount,
                     min_out,
                     &pool,
+                    fee_bps,
                 )?
             };
             
@@ -410,9 +432,6 @@ impl BelugaRouter {
     }
     
     /// Get optimal split quote for large orders
-    /// 
-    /// For simplicity, currently returns single best pool.
-    /// Future versions can implement more sophisticated splitting.
     pub fn get_split_quote(
         env: Env,
         token_in: Address,
@@ -435,6 +454,7 @@ impl BelugaRouter {
         let best_quote = Self::find_best_pool(&env, &config.factory, &token_in, &token_out, amount_in, &tiers)?;
         
         // Simple implementation: single pool for now
+        // TODO: Implement proper split logic based on liquidity depth
         let split = SplitQuote {
             pool: best_quote.pool.clone(),
             fee_bps: best_quote.fee_bps,
@@ -505,6 +525,14 @@ impl BelugaRouter {
         Ok(read_config(&env))
     }
     
+    /// Get factory address
+    pub fn get_factory(env: Env) -> Result<Address, RouterError> {
+        if !is_initialized(&env) {
+            return Err(RouterError::NotInitialized);
+        }
+        Ok(read_config(&env).factory)
+    }
+    
     /// Check if router is initialized
     pub fn is_initialized(env: Env) -> bool {
         is_initialized(&env)
@@ -544,7 +572,6 @@ impl BelugaRouter {
         amount_in: i128,
         sqrt_price_limit: u128,
     ) -> Option<(i128, i128)> {
-        // Call pool's preview_swap
         let result: PreviewResultRaw = env.invoke_contract(
             pool,
             &Symbol::new(env, "preview_swap"),
@@ -552,7 +579,7 @@ impl BelugaRouter {
                 env,
                 token_in.clone().into_val(env),
                 amount_in.into_val(env),
-                0i128.into_val(env), // min_amount_out = 0 for quote
+                0i128.into_val(env),
                 sqrt_price_limit.into_val(env),
             ],
         );
@@ -654,6 +681,7 @@ impl BelugaRouter {
         amount_in: i128,
         amount_out_min: i128,
         pool: &Address,
+        fee_bps: u32,
     ) -> Result<SwapResult, RouterError> {
         let router_addr = env.current_contract_address();
         
@@ -669,12 +697,11 @@ impl BelugaRouter {
             amount_in,
             amount_out_min,
             pool,
+            fee_bps,
         )
     }
     
     /// Execute swap using tokens already in router
-    /// 
-    /// Used for multi-hop swaps where intermediate tokens are held by router
     fn execute_swap_from_router(
         env: &Env,
         recipient: &Address,
@@ -683,9 +710,8 @@ impl BelugaRouter {
         amount_in: i128,
         amount_out_min: i128,
         pool: &Address,
+        fee_bps: u32,
     ) -> Result<SwapResult, RouterError> {
-        // Tokens are already in router, no transfer needed
-        // Just execute the swap
         Self::execute_pool_swap(
             env,
             recipient,
@@ -694,6 +720,7 @@ impl BelugaRouter {
             amount_in,
             amount_out_min,
             pool,
+            fee_bps,
         )
     }
     
@@ -706,15 +733,17 @@ impl BelugaRouter {
         amount_in: i128,
         amount_out_min: i128,
         pool: &Address,
+        fee_bps: u32,
     ) -> Result<SwapResult, RouterError> {
         let router_addr = env.current_contract_address();
+        let current_ledger = env.ledger().sequence();
         
-        // Approve pool to spend tokens from router
+        // Minimal approval - just enough for this transaction
         token::Client::new(env, token_in).approve(
             &router_addr,
             pool,
             &amount_in,
-            &(env.ledger().sequence() + 1000),
+            &(current_ledger + APPROVAL_LEDGER_BUFFER),
         );
         
         // Call pool swap - router is the sender
@@ -723,7 +752,7 @@ impl BelugaRouter {
             &Symbol::new(env, "swap"),
             vec![
                 env,
-                router_addr.clone().into_val(env), // Router is always the swap sender
+                router_addr.clone().into_val(env),
                 token_in.clone().into_val(env),
                 amount_in.into_val(env),
                 amount_out_min.into_val(env),
@@ -739,13 +768,12 @@ impl BelugaRouter {
                 &swap_result.amount_out,
             );
         }
-        // If recipient IS router (intermediate hop), tokens stay in router
         
         Ok(SwapResult {
             amount_in: swap_result.amount_in,
             amount_out: swap_result.amount_out,
             pools_used: vec![env, pool.clone()],
-            fee_tiers_used: vec![env, 0u32], // Will be filled by caller
+            fee_tiers_used: vec![env, fee_bps],
         })
     }
 }
@@ -754,7 +782,7 @@ impl BelugaRouter {
 // HELPER TYPES FOR CROSS-CONTRACT CALLS
 // ============================================================
 
-/// Raw preview result from pool (matching pool's PreviewResult)
+/// Raw preview result from pool
 #[soroban_sdk::contracttype]
 #[derive(Clone, Debug)]
 struct PreviewResultRaw {

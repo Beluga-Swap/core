@@ -27,6 +27,10 @@ pub enum RouterError {
     QuoteFailed = 30,
     InvalidAmount = 31,
     
+    // Split errors
+    EmptySplits = 40,
+    SplitAmountMismatch = 41,
+    
     // Authorization
     Unauthorized = 50,
 }

@@ -4,11 +4,18 @@
 //! 
 //! Permissionless pool deployment with creator incentives.
 //! 
+//! ## Deployment Flow:
+//! 1. Deploy Factory → initialize(admin, pool_wasm_hash)
+//! 2. Deploy Router
+//! 3. Set router in Factory → set_router(router_address)
+//! 4. Create pools via Factory
+//! 
 //! ## Responsibilities:
 //! 1. Create pools (atomic: deploy + init + LP + lock)
 //! 2. Fee tier standardization
 //! 3. Duplicate prevention
 //! 4. Creator lock management
+//! 5. Router registry
 
 use soroban_sdk::{
     contract, contractimpl, vec, Address, BytesN, Env, IntoVal, Symbol, Vec,
@@ -48,10 +55,11 @@ pub struct BelugaFactory;
 #[contractimpl]
 impl BelugaFactory {
     // ========================================================
-    // WRITE FUNCTIONS 
+    // INITIALIZATION (Phase 1)
     // ========================================================
     
-    /// Initialize factory
+    /// Initialize factory with pool rules
+    /// Router is set separately after router deployment
     pub fn initialize(
         env: Env,
         admin: Address,
@@ -63,10 +71,11 @@ impl BelugaFactory {
             return Err(FactoryError::AlreadyInitialized);
         }
         
-        // Save config
+        // Save config (router = None initially)
         let config = FactoryConfig {
             admin: admin.clone(),
             pool_wasm_hash,
+            router: None,
         };
         write_config(&env, &config);
         set_initialized(&env);
@@ -79,6 +88,38 @@ impl BelugaFactory {
         
         Ok(())
     }
+    
+    // ========================================================
+    // ROUTER SETUP (Phase 2)
+    // ========================================================
+    
+    /// Set router address (admin only, one-time setup)
+    /// Call this after deploying the router contract
+    pub fn set_router(
+        env: Env,
+        router: Address,
+    ) -> Result<(), FactoryError> {
+        let mut config = read_config(&env);
+        config.admin.require_auth();
+        
+        // Allow setting router only once (or allow update - your choice)
+        // Current: allow update for flexibility
+        config.router = Some(router.clone());
+        write_config(&env, &config);
+        
+        emit_router_set(&env, &router);
+        
+        Ok(())
+    }
+    
+    /// Get router address
+    pub fn get_router(env: Env) -> Option<Address> {
+        read_config(&env).router
+    }
+    
+    // ========================================================
+    // POOL CREATION
+    // ========================================================
     
     /// Create pool (atomic: deploy + init + LP + lock)
     /// 
@@ -106,6 +147,13 @@ impl BelugaFactory {
         
         if !is_initialized(&env) {
             return Err(FactoryError::NotInitialized);
+        }
+        
+        let config = read_config(&env);
+        
+        // Router must be set before creating pools
+        if config.router.is_none() {
+            return Err(FactoryError::RouterNotSet);
         }
         
         // Validate tokens
@@ -162,12 +210,11 @@ impl BelugaFactory {
         }
         
         // === DEPLOY POOL ===
-        let config = read_config(&env);
         let pool_address = Self::deploy_pool(&env, &config, &token0, &token1, fee_bps);
         
         // === INITIALIZE POOL ===
-        // Send factory address (this contract) as first parameter
         let factory_address = env.current_contract_address();
+        let router_address = config.router.unwrap(); // Safe: checked above
         let current_tick = Self::sqrt_price_to_tick(initial_sqrt_price_x64);
         
         let _: () = env.invoke_contract(
@@ -175,7 +222,8 @@ impl BelugaFactory {
             &Symbol::new(&env, "initialize"),
             vec![
                 &env,
-                factory_address.into_val(&env),   
+                factory_address.into_val(&env),
+                router_address.into_val(&env),  // Pass router to pool
                 creator.clone().into_val(&env),
                 token_a.clone().into_val(&env),
                 token_b.clone().into_val(&env),
@@ -262,10 +310,12 @@ impl BelugaFactory {
             return Err(FactoryError::CreatorFeeRevoked);
         }
         
+        // Check if permanent lock
         if lock.is_permanent {
             return Err(FactoryError::LiquidityStillLocked);
         }
         
+        // Check if lock period has ended
         let current_ledger = env.ledger().sequence();
         if current_ledger < lock.lock_end {
             return Err(FactoryError::LiquidityStillLocked);
@@ -333,18 +383,6 @@ impl BelugaFactory {
     }
     
     /// Check if creator's liquidity is still locked
-    /// 
-    /// Called by Pool contract during remove_liquidity to enforce lock.
-    /// 
-    /// # Arguments
-    /// * `pool_address` - Pool contract address
-    /// * `creator` - Creator address to check
-    /// * `lower_tick` - Lower tick of position being withdrawn
-    /// * `upper_tick` - Upper tick of position being withdrawn
-    /// 
-    /// # Returns
-    /// * `true` - Position is locked, withdrawal should be blocked
-    /// * `false` - Position is not locked or lock expired, withdrawal allowed
     pub fn is_liquidity_locked(
         env: Env,
         pool_address: Address,
@@ -354,41 +392,23 @@ impl BelugaFactory {
     ) -> bool {
         match read_creator_lock(&env, &pool_address, &creator) {
             Some(lock) => {
-                // Check if this is the locked position
                 if lock.lower_tick != lower_tick || lock.upper_tick != upper_tick {
-                    return false; // Different position, not locked
+                    return false;
                 }
-                
-                // Check if already unlocked
                 if lock.is_unlocked {
                     return false;
                 }
-                
-                // Check if permanent lock
                 if lock.is_permanent {
-                    return true; // Permanently locked
+                    return true;
                 }
-                
-                // Check if lock has expired
                 let current_ledger = env.ledger().sequence();
                 current_ledger < lock.lock_end
             }
-            None => false, // No lock found
+            None => false,
         }
     }
     
     /// Check if creator fee is still active (not revoked)
-    /// 
-    /// This is called by Pool contract during swaps to determine
-    /// if creator should still receive fee share.
-    /// 
-    /// Returns true if:
-    /// - Creator lock exists AND
-    /// - fee_revoked == false
-    /// 
-    /// Returns false if:
-    /// - Creator lock doesn't exist OR
-    /// - fee_revoked == true
     pub fn is_creator_fee_active(
         env: Env,
         pool_address: Address,
@@ -398,6 +418,14 @@ impl BelugaFactory {
             Some(lock) => !lock.fee_revoked,
             None => false,
         }
+    }
+    
+    /// Check if factory is ready (initialized + router set)
+    pub fn is_ready(env: Env) -> bool {
+        if !is_initialized(&env) {
+            return false;
+        }
+        read_config(&env).router.is_some()
     }
     
     // ========================================================
@@ -417,7 +445,6 @@ impl BelugaFactory {
     }
     
     /// Transfer admin role to new address
-    ///  Both old and new admin must authorize
     pub fn set_admin(env: Env, new_admin: Address) -> Result<(), FactoryError> {
         let mut config = read_config(&env);
         config.admin.require_auth();
@@ -431,7 +458,6 @@ impl BelugaFactory {
     }
     
     /// Add or update fee tier configuration
-    /// Added fee_bps validation
     pub fn set_fee_tier(
         env: Env,
         fee_bps: u32,
@@ -445,7 +471,6 @@ impl BelugaFactory {
             return Err(FactoryError::InvalidTickSpacing);
         }
         
-        // Validate fee_bps range
         if fee_bps == 0 || fee_bps > MAX_FEE_BPS {
             return Err(FactoryError::InvalidFeeTier);
         }

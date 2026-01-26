@@ -33,12 +33,9 @@ impl BelugaPool {
     
     /// Initialize pool
     /// 
-    /// # Security Fix
-    /// - Added `factory` parameter to properly set factory address
-    /// - Factory must authorize the call (proves it's the deployer)
-    /// 
     /// # Arguments
-    /// * `factory` - Factory contract address (MUST be a contract, not EOA)
+    /// * `factory` - Factory contract address
+    /// * `router` - Router contract address (for authorized swaps)
     /// * `creator` - Pool creator address
     /// * `token_a` - First token
     /// * `token_b` - Second token
@@ -49,7 +46,8 @@ impl BelugaPool {
     /// * `tick_spacing` - Tick spacing for this fee tier
     pub fn initialize(
         env: Env,
-        factory: Address,     
+        factory: Address,
+        router: Address,      // NEW: router parameter
         creator: Address,
         token_a: Address,
         token_b: Address,
@@ -85,7 +83,8 @@ impl BelugaPool {
         };
         
         let config = PoolConfig {
-            factory,              
+            factory,
+            router,           // NEW: store router
             creator,
             token_a,
             token_b,
@@ -115,9 +114,14 @@ impl BelugaPool {
         read_pool_state(&env)
     }
     
-    /// Get pool configuration (tokens, fees, creator)
+    /// Get pool configuration (tokens, fees, creator, router)
     pub fn get_pool_config(env: Env) -> PoolConfig {
         read_pool_config(&env)
+    }
+    
+    /// Get router address
+    pub fn get_router(env: Env) -> Address {
+        read_pool_config(&env).router
     }
     
     /// Get position info for an LP
@@ -219,7 +223,6 @@ impl BelugaPool {
             config.fee_bps as i128,
         ) {
             Ok((amount_in_used, amount_out, fee_paid, price_impact_bps, _final_price)) => {
-                // [FIX] Use price_impact_bps from package (correctly calculated)
                 PreviewResult::valid(amount_in_used, amount_out, fee_paid, price_impact_bps)
             }
             Err(error_symbol) => PreviewResult::invalid(error_symbol),
@@ -231,6 +234,10 @@ impl BelugaPool {
     // ========================================================
     
     /// Execute a swap
+    /// 
+    /// Can be called by:
+    /// - Direct user (sender.require_auth)
+    /// - Router contract (for multi-hop swaps)
     pub fn swap(
         env: Env,
         sender: Address,
@@ -357,22 +364,9 @@ impl BelugaPool {
         
         (liquidity, amount0, amount1)
     }
-
-    // ========================================================
-    // MINT FUNCTION (For Factory Integration)
-    // ========================================================
     
-    /// Mint liquidity - used by Factory during pool creation
-    /// 
-    /// # Arguments
-    /// * `owner` - Position owner
-    /// * `lower_tick` - Lower tick boundary
-    /// * `upper_tick` - Upper tick boundary
-    /// * `amount0_desired` - Amount of token0 expected in pool
-    /// * `amount1_desired` - Amount of token1 expected in pool
-    /// 
-    /// # Returns
-    /// Liquidity minted
+    /// Mint liquidity (called by factory during pool creation)
+    /// Tokens must already be transferred to pool
     pub fn mint(
         env: Env,
         owner: Address,
@@ -381,24 +375,9 @@ impl BelugaPool {
         amount0_desired: i128,
         amount1_desired: i128,
     ) -> i128 {
-        let config = read_pool_config(&env);
+        // No auth required - factory handles this
+        // Tokens already transferred by factory
         
-        // Only factory can call mint
-        config.factory.require_auth();
-        
-        // Verify tokens are actually in pool
-        let state = read_pool_state(&env);
-        let pool_addr = env.current_contract_address();
-        
-        let balance0 = token::Client::new(&env, &state.token0).balance(&pool_addr);
-        let balance1 = token::Client::new(&env, &state.token1).balance(&pool_addr);
-        
-        // Must have at least the desired amounts
-        if balance0 < amount0_desired || balance1 < amount1_desired {
-            panic!("insufficient token balance in pool");
-        }
-        
-        // Delegate to internal function (no slippage check for factory mint)
         let (liquidity, amount0, amount1) = Self::internal_add_liquidity(
             &env,
             &owner,
@@ -406,11 +385,9 @@ impl BelugaPool {
             upper_tick,
             amount0_desired,
             amount1_desired,
-            0, // no min for factory
-            0, // no min for factory
+            0, // No slippage check for factory mint
+            0,
         );
-        
-        // No transfer - factory already transferred tokens
         
         emit_add_liquidity(&env, liquidity, amount0, amount1);
         
@@ -423,55 +400,72 @@ impl BelugaPool {
         owner: Address,
         lower_tick: i32,
         upper_tick: i32,
-        liquidity_delta: i128,
+        liquidity: i128,
+        amount0_min: i128,
+        amount1_min: i128,
     ) -> (i128, i128) {
         owner.require_auth();
         
-        let config = read_pool_config(&env);
-        let mut pool = read_pool_state(&env);
-        let pool_addr = env.current_contract_address();
-        
-        let lower = snap_tick_to_spacing(lower_tick, pool.tick_spacing);
-        let upper = snap_tick_to_spacing(upper_tick, pool.tick_spacing);
-        
-        if liquidity_delta <= 0 {
+        if liquidity <= 0 {
             panic!("{}", ErrorMsg::INVALID_LIQUIDITY_AMOUNT);
         }
         
-        // Check if this position is locked (creator lock enforcement)
-        // Query factory to check if owner has active lock on this position
-        if Self::is_position_locked(&env, &config, &owner, lower, upper) {
-            panic!("position is locked - use factory.unlock_creator_liquidity first");
+        let config = read_pool_config(&env);
+        let mut state = read_pool_state(&env);
+        
+        let lower_aligned = snap_tick_to_spacing(lower_tick, state.tick_spacing);
+        let upper_aligned = snap_tick_to_spacing(upper_tick, state.tick_spacing);
+        
+        // Check if position is locked (only affects creator's locked position)
+        if Self::is_position_locked(&env, &config, &owner, lower_aligned, upper_aligned) {
+            panic!("position is locked");
         }
         
-        let (inside_0, inside_1) = get_fee_growth_inside_local(
-            &env,
-            lower,
-            upper,
-            pool.current_tick,
-            pool.fee_growth_global_0,
-            pool.fee_growth_global_1,
-        );
+        let mut pos = read_position(&env, &owner, lower_aligned, upper_aligned);
         
-        let mut pos = read_position(&env, &owner, lower, upper);
-        
-        if liquidity_delta > pos.liquidity {
+        if pos.liquidity < liquidity {
             panic!("{}", ErrorMsg::INSUFFICIENT_LIQUIDITY);
         }
         
-        modify_position(&mut pos, -liquidity_delta, inside_0, inside_1);
-        write_position(&env, &owner, lower, upper, &pos);
+        // Calculate amounts to withdraw
+        let (amount0, amount1) = get_amounts_for_liquidity(
+            &env,
+            liquidity,
+            get_sqrt_ratio_at_tick(lower_aligned),
+            get_sqrt_ratio_at_tick(upper_aligned),
+            state.sqrt_price_x64,
+        );
+        
+        // Slippage check
+        if amount0 < amount0_min || amount1 < amount1_min {
+            panic!("{}", ErrorMsg::SLIPPAGE_EXCEEDED);
+        }
+        
+        // Update fee growth
+        let fee_growth_inside = get_fee_growth_inside_local(
+            &env,
+            lower_aligned,
+            upper_aligned,
+            state.current_tick,
+            state.fee_growth_global_0,
+            state.fee_growth_global_1,
+        );
+        
+        update_position(&mut pos, fee_growth_inside.0, fee_growth_inside.1);
+        
+        // Subtract liquidity from position
+        pos.liquidity = pos.liquidity.saturating_sub(liquidity);
         
         // Update ticks
         belugaswap_tick::update_tick(
             &env,
             |e, t| read_tick_info(e, t),
             |e, t, info| write_tick_info(e, t, info),
-            lower,
-            pool.current_tick,
-            -liquidity_delta,
-            pool.fee_growth_global_0,
-            pool.fee_growth_global_1,
+            lower_aligned,
+            state.current_tick,
+            -liquidity,
+            state.fee_growth_global_0,
+            state.fee_growth_global_1,
             false,
         );
         
@@ -479,51 +473,37 @@ impl BelugaPool {
             &env,
             |e, t| read_tick_info(e, t),
             |e, t, info| write_tick_info(e, t, info),
-            upper,
-            pool.current_tick,
-            -liquidity_delta,
-            pool.fee_growth_global_0,
-            pool.fee_growth_global_1,
+            upper_aligned,
+            state.current_tick,
+            -liquidity,
+            state.fee_growth_global_0,
+            state.fee_growth_global_1,
             true,
         );
         
         // Update pool liquidity if in range
-        if pool.current_tick >= lower && pool.current_tick < upper {
-            pool.liquidity = pool.liquidity.saturating_sub(liquidity_delta);
+        if state.current_tick >= lower_aligned && state.current_tick < upper_aligned {
+            state.liquidity = state.liquidity.saturating_sub(liquidity);
         }
-        write_pool_state(&env, &pool);
         
-        // Calculate amounts to return
-        let sqrt_lower = get_sqrt_ratio_at_tick(lower);
-        let sqrt_upper = get_sqrt_ratio_at_tick(upper);
-        
-        let (amount0, amount1) = get_amounts_for_liquidity(
-            &env,
-            liquidity_delta,
-            sqrt_lower,
-            sqrt_upper,
-            pool.sqrt_price_x64,
-        );
+        write_pool_state(&env, &state);
+        write_position(&env, &owner, lower_aligned, upper_aligned, &pos);
         
         // Transfer tokens to owner
         if amount0 > 0 {
-            token::Client::new(&env, &pool.token0).transfer(&pool_addr, &owner, &amount0);
+            token::Client::new(&env, &state.token0).transfer(&env.current_contract_address(), &owner, &amount0);
         }
         if amount1 > 0 {
-            token::Client::new(&env, &pool.token1).transfer(&pool_addr, &owner, &amount1);
+            token::Client::new(&env, &state.token1).transfer(&env.current_contract_address(), &owner, &amount1);
         }
         
-        emit_remove_liquidity(&env, liquidity_delta, amount0, amount1);
+        emit_remove_liquidity(&env, liquidity, amount0, amount1);
         
         (amount0, amount1)
     }
     
-    // ========================================================
-    // FEE COLLECTION
-    // ========================================================
-    
-    /// Collect accumulated LP fees
-    pub fn collect(
+    /// Collect accumulated fees from a position
+    pub fn collect_fees(
         env: Env,
         owner: Address,
         lower_tick: i32,
@@ -531,106 +511,91 @@ impl BelugaPool {
     ) -> (u128, u128) {
         owner.require_auth();
         
-        let pool = read_pool_state(&env);
-        let pool_addr = env.current_contract_address();
+        let state = read_pool_state(&env);
         
-        let lower = snap_tick_to_spacing(lower_tick, pool.tick_spacing);
-        let upper = snap_tick_to_spacing(upper_tick, pool.tick_spacing);
+        let lower_aligned = snap_tick_to_spacing(lower_tick, state.tick_spacing);
+        let upper_aligned = snap_tick_to_spacing(upper_tick, state.tick_spacing);
         
-        let mut pos = read_position(&env, &owner, lower, upper);
+        let mut pos = read_position(&env, &owner, lower_aligned, upper_aligned);
         
-        let (inside_0, inside_1) = get_fee_growth_inside_local(
+        // Update fee growth
+        let fee_growth_inside = get_fee_growth_inside_local(
             &env,
-            lower,
-            upper,
-            pool.current_tick,
-            pool.fee_growth_global_0,
-            pool.fee_growth_global_1,
+            lower_aligned,
+            upper_aligned,
+            state.current_tick,
+            state.fee_growth_global_0,
+            state.fee_growth_global_1,
         );
         
-        update_position(&mut pos, inside_0, inside_1);
+        let (pending0, pending1) = calculate_pending_fees(&pos, fee_growth_inside.0, fee_growth_inside.1);
         
-        let amount0 = pos.tokens_owed_0;
-        let amount1 = pos.tokens_owed_1;
+        let fees0 = pos.tokens_owed_0.saturating_add(pending0);
+        let fees1 = pos.tokens_owed_1.saturating_add(pending1);
         
-        // Cap by pool balance
-        let pool_balance_0 = token::Client::new(&env, &pool.token0).balance(&pool_addr) as u128;
-        let pool_balance_1 = token::Client::new(&env, &pool.token1).balance(&pool_addr) as u128;
+        // Reset owed tokens
+        pos.tokens_owed_0 = 0;
+        pos.tokens_owed_1 = 0;
+        pos.fee_growth_inside_last_0 = fee_growth_inside.0;
+        pos.fee_growth_inside_last_1 = fee_growth_inside.1;
         
-        let amount0_capped = amount0.min(pool_balance_0);
-        let amount1_capped = amount1.min(pool_balance_1);
-        
-        pos.tokens_owed_0 = pos.tokens_owed_0.saturating_sub(amount0_capped);
-        pos.tokens_owed_1 = pos.tokens_owed_1.saturating_sub(amount1_capped);
-        
-        write_position(&env, &owner, lower, upper, &pos);
-        
-        // Safe cast with bounds check
-        let transfer0 = safe_u128_to_i128(amount0_capped);
-        let transfer1 = safe_u128_to_i128(amount1_capped);
+        write_position(&env, &owner, lower_aligned, upper_aligned, &pos);
         
         // Transfer fees
-        if transfer0 > 0 {
-            token::Client::new(&env, &pool.token0)
-                .transfer(&pool_addr, &owner, &transfer0);
+        if fees0 > 0 {
+            token::Client::new(&env, &state.token0).transfer(
+                &env.current_contract_address(),
+                &owner,
+                &safe_u128_to_i128(fees0),
+            );
         }
-        if transfer1 > 0 {
-            token::Client::new(&env, &pool.token1)
-                .transfer(&pool_addr, &owner, &transfer1);
+        if fees1 > 0 {
+            token::Client::new(&env, &state.token1).transfer(
+                &env.current_contract_address(),
+                &owner,
+                &safe_u128_to_i128(fees1),
+            );
         }
         
-        emit_collect(&env, amount0_capped, amount1_capped);
+        emit_collect(&env, fees0, fees1);
         
-        (amount0_capped, amount1_capped)
+        (fees0, fees1)
     }
     
-    /// Claim creator fees
-    /// 
-    /// Note: Creator can claim accumulated fees even after revocation.
-    /// However, no NEW fees will accumulate after revocation.
-    pub fn claim_creator_fees(env: Env, claimer: Address) -> (u128, u128) {
-        claimer.require_auth();
-        
+    /// Claim creator fees (only creator can call)
+    pub fn claim_creator_fees(env: Env) -> (u128, u128) {
         let config = read_pool_config(&env);
-        let mut pool = read_pool_state(&env);
-        let pool_addr = env.current_contract_address();
+        config.creator.require_auth();
         
-        if claimer != config.creator {
-            panic!("{}", ErrorMsg::UNAUTHORIZED);
+        let mut state = read_pool_state(&env);
+        
+        let fees0 = state.creator_fees_0;
+        let fees1 = state.creator_fees_1;
+        
+        // Reset creator fees
+        state.creator_fees_0 = 0;
+        state.creator_fees_1 = 0;
+        write_pool_state(&env, &state);
+        
+        // Transfer fees to creator
+        if fees0 > 0 {
+            token::Client::new(&env, &state.token0).transfer(
+                &env.current_contract_address(),
+                &config.creator,
+                &safe_u128_to_i128(fees0),
+            );
+        }
+        if fees1 > 0 {
+            token::Client::new(&env, &state.token1).transfer(
+                &env.current_contract_address(),
+                &config.creator,
+                &safe_u128_to_i128(fees1),
+            );
         }
         
-        let amount0 = pool.creator_fees_0;
-        let amount1 = pool.creator_fees_1;
+        emit_claim_creator_fees(&env, fees0, fees1);
         
-        // Cap by pool balance
-        let pool_balance_0 = token::Client::new(&env, &pool.token0).balance(&pool_addr) as u128;
-        let pool_balance_1 = token::Client::new(&env, &pool.token1).balance(&pool_addr) as u128;
-        
-        let amount0_capped = amount0.min(pool_balance_0);
-        let amount1_capped = amount1.min(pool_balance_1);
-        
-        pool.creator_fees_0 = pool.creator_fees_0.saturating_sub(amount0_capped);
-        pool.creator_fees_1 = pool.creator_fees_1.saturating_sub(amount1_capped);
-        
-        write_pool_state(&env, &pool);
-        
-        // Safe cast with bounds check
-        let transfer0 = safe_u128_to_i128(amount0_capped);
-        let transfer1 = safe_u128_to_i128(amount1_capped);
-        
-        // Transfer fees
-        if transfer0 > 0 {
-            token::Client::new(&env, &pool.token0)
-                .transfer(&pool_addr, &claimer, &transfer0);
-        }
-        if transfer1 > 0 {
-            token::Client::new(&env, &pool.token1)
-                .transfer(&pool_addr, &claimer, &transfer1);
-        }
-        
-        emit_claim_creator_fees(&env, amount0_capped, amount1_capped);
-        
-        (amount0_capped, amount1_capped)
+        (fees0, fees1)
     }
     
     // ========================================================
@@ -734,11 +699,6 @@ impl BelugaPool {
     }
     
     /// Check if a position is locked by querying factory
-    /// 
-    /// Returns true if:
-    /// - Owner is the pool creator AND
-    /// - Position matches locked position (same ticks) AND
-    /// - Lock is still active (not unlocked and not expired)
     fn is_position_locked(
         env: &Env,
         config: &PoolConfig,
@@ -797,63 +757,6 @@ impl BelugaPool {
 // HELPER FUNCTIONS
 // ============================================================
 
-/// Calculate expected output at current spot price (no price impact)
-/// 
-/// Used to measure price impact by comparing with actual output.
-/// Both expected and actual are in OUTPUT token units (apples to apples).
-fn calculate_expected_output_at_spot(
-    sqrt_price_x64: u128,
-    amount_in: i128,
-    zero_for_one: bool,
-    fee_bps: u32,
-) -> i128 {
-    if amount_in <= 0 || sqrt_price_x64 == 0 {
-        return 0;
-    }
-
-    let amount_in_u = amount_in as u128;
-    const Q64: u128 = 1u128 << 64;
-    
-    // Calculate amount after fee
-    let fee_multiplier = (10000 - fee_bps) as u128;
-    let amount_after_fee = amount_in_u
-        .saturating_mul(fee_multiplier)
-        .saturating_div(10000);
-
-    // Calculate output based on direction
-    let output = if zero_for_one {
-        // token0 -> token1: multiply by price
-        // output = amount * (sqrt_price / Q64)^2
-        let price_squared = sqrt_price_x64.saturating_mul(sqrt_price_x64);
-        amount_after_fee
-            .saturating_mul(price_squared)
-            .saturating_div(Q64)
-            .saturating_div(Q64)
-    } else {
-        // token1 -> token0: divide by price
-        // output = amount / (sqrt_price / Q64)^2
-        let price_squared = sqrt_price_x64.saturating_mul(sqrt_price_x64);
-        if price_squared == 0 {
-            return 0;
-        }
-        amount_after_fee
-            .saturating_mul(Q64)
-            .saturating_mul(Q64)
-            .saturating_div(price_squared)
-    };
-
-    // Cap at i128::MAX and return
-    if output > i128::MAX as u128 {
-        i128::MAX
-    } else {
-        output as i128
-    }
-}
-
-// ========================================================
-// MORE HELPER FUNCTIONS
-// ========================================================
-
 fn get_fee_growth_inside_local(
     env: &Env,
     lower_tick: i32,
@@ -874,7 +777,6 @@ fn get_fee_growth_inside_local(
 }
 
 /// Safe conversion from u128 to i128
-/// Returns i128::MAX if value exceeds i128 range
 #[inline]
 fn safe_u128_to_i128(value: u128) -> i128 {
     if value > i128::MAX as u128 {

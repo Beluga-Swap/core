@@ -10,6 +10,14 @@ pub fn emit_initialized(env: &Env, admin: &Address) {
     );
 }
 
+/// Emitted when router is set
+pub fn emit_router_set(env: &Env, router: &Address) {
+    env.events().publish(
+        (Symbol::new(env, "RouterSet"),),
+        (router.clone(),),
+    );
+}
+
 /// Emitted when a new pool is created
 pub fn emit_pool_created(
     env: &Env,

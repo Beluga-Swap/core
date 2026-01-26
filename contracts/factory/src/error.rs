@@ -10,6 +10,10 @@ pub enum FactoryError {
     AlreadyInitialized = 1,
     NotInitialized = 2,
     
+    // Router
+    RouterNotSet = 5,
+    RouterAlreadySet = 6,
+    
     // Pool creation
     PoolAlreadyExists = 10,
     InvalidTokenPair = 11,

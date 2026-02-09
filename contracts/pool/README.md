@@ -4,7 +4,7 @@ Concentrated liquidity AMM pool contract with creator fees and factory/router in
 
 ---
 
-## 🏊 Pool Functions
+## 🦈 Pool Functions
 
 The pool contract handles:
 
@@ -46,6 +46,129 @@ pub struct PoolConfig {
     pub creator_fee_bps: u32,  // Creator's share of fees
 }
 ```
+
+---
+
+## ⚙️ Quick Setup
+
+### Step 1: Deploy Pool via Factory
+
+Pools are created through the Factory contract, not deployed directly. After deploying Factory and Router, create a pool:
+
+```bash
+# Set your environment
+export NETWORK="testnet"
+export FACTORY="YOUR_FACTORY_ADDRESS"
+export SOURCE="alice"  # your account
+
+# Create pool
+stellar contract invoke \
+  --id $FACTORY \
+  --source $SOURCE \
+  --network $NETWORK \
+  -- create_pool \
+  --creator alice \
+  --params '{
+    "token_a": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+    "token_b": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+    "fee_bps": "30",
+    "creator_fee_bps": "100",
+    "initial_sqrt_price_x64": "18446744073709551616",
+    "amount0_desired": "1000000000",
+    "amount1_desired": "1000000000",
+    "lower_tick": -600,
+    "upper_tick": 600,
+    "lock_duration": 0
+  }'
+```
+
+**Output will show the pool address:**
+```bash
+"CAYNHCAVRMSI3HXKOS7HZ6OUWBA2WQKELIKQ3T532F44QKSOCLDJZ62H"
+```
+
+---
+
+### Step 2: Save Pool Address
+
+**IMMEDIATELY save the returned pool address:**
+
+```bash
+# Export for current session
+export POOL="CAYNHCAVRMSI3HXKOS7HZ6OUWBA2WQKELIKQ3T532F44QKSOCLDJZ62H"
+
+# Verify it's set
+echo $POOL
+# Should output: CAYNHCAVRMSI3HXKOS7HZ6OUWBA2WQKELIKQ3T532F44QKSOCLDJZ62H
+```
+
+---
+
+### Step 3: Create Environment File (Recommended)
+
+Save addresses permanently for easy reuse:
+
+```bash
+# Create .env.testnet file
+cat > .env.testnet << 'EOF'
+# BelugaSwap Testnet Environment
+export NETWORK="testnet"
+
+# Core Contracts
+export FACTORY="CAYNNWB3GCC3WIIL7J2HS6QJTXGIL4E3INWBA6UF2OEIUTO2ZOVJFM7V"
+export ROUTER="CC363XX4IXCC57KC5LMYOXRCC6L7VWFXAGBX7C2573XP36BTYRCQGM54"
+
+# Your Pool (from create_pool output)
+export POOL="CAYNHCAVRMSI3HXKOS7HZ6OUWBA2WQKELIKQ3T532F44QKSOCLDJZ62H"
+
+# Tokens
+export TOKEN_XLM="CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC"
+export TOKEN_USDC="CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA"
+
+# Accounts
+export SOURCE="alice"
+export USER="GBRKBE3LLJG2GH3MDLKYRKFFIZANSLEODQ4CO7USVSVMLQRJLYWQUIGO"
+EOF
+
+# Load environment
+source .env.testnet
+
+# Verify all variables
+echo "Pool: $POOL"
+echo "Network: $NETWORK"
+echo "Factory: $FACTORY"
+```
+
+---
+
+### Step 4: Test Pool Connection
+
+Verify the pool is accessible and initialized:
+
+```bash
+# Should return pool state with liquidity, price, etc.
+stellar contract invoke --id $POOL --network $NETWORK -- get_pool_state
+
+# Should return configuration with factory, router, tokens, fees
+stellar contract invoke --id $POOL --network $NETWORK -- get_pool_config
+
+# Should return true
+stellar contract invoke --id $POOL --network $NETWORK -- is_initialized
+```
+
+**If you get `error: a value is required for '--id <CONTRACT_ID>'`:**
+- Your `$POOL` variable is not set
+- Run `export POOL="YOUR_POOL_ADDRESS"` first
+- Or load environment: `source .env.testnet`
+
+---
+
+### Step 5: Ready to Interact!
+
+Now you can use all pool functions. Jump to:
+- [View Functions](#view-functions-no-transaction-required) - Read pool data
+- [Transaction Functions](#transaction-functions-require-signing) - Add/remove liquidity, collect fees
+- [Common Use Cases](#-common-use-cases) - Complete examples
 
 ---
 
@@ -289,7 +412,7 @@ Check if pool is initialized.
 
 ---
 
-## 🔐 Creator Lock Integration
+## 🔒 Creator Lock Integration
 
 Pool queries Factory to check creator lock status:
 
@@ -359,64 +482,160 @@ stellar contract build
 # Output: target/wasm32v1-none/release/belugaswap_pool.wasm
 ```
 
-### Pool Interaction
+---
 
-Pools are created via Factory, but you can interact directly:
+## 🔧 Pool Interaction
+
+**⚠️ IMPORTANT:** Before using these commands, complete the [Quick Setup](#%EF%B8%8F-quick-setup) above to:
+1. Create your pool via Factory
+2. Get the pool address from the output
+3. Export the pool address as `$POOL`
+
+If you've already created a pool and have the address, set it now:
+
+```bash
+export POOL="YOUR_POOL_ADDRESS"  # From create_pool output
+export NETWORK="testnet"
+```
+
+To avoid setting variables repeatedly, create a `.env.testnet` file (see [Step 3 in Quick Setup](#step-3-create-environment-file-recommended)).
+
+---
+
+### View Functions (No Transaction Required)
+
+These functions are read-only and don't require transaction signing:
 
 ```bash
 # Get pool state
-stellar contract invoke --id $POOL --network $NETWORK -- get_pool_state
+stellar contract invoke \
+  --id $POOL \
+  --network $NETWORK \
+  -- get_pool_state
 
 # Get pool config
-stellar contract invoke --id $POOL --network $NETWORK -- get_pool_config
+stellar contract invoke \
+  --id $POOL \
+  --network $NETWORK \
+  -- get_pool_config
 
-# Preview swap
-stellar contract invoke --id $POOL --network $NETWORK \
+# Preview swap (simulation)
+stellar contract invoke \
+  --id $POOL \
+  --network $NETWORK \
   -- preview_swap \
-  --token_in $TOKEN_A \
-  --amount_in 10000000 \
-  --min_amount_out 0 \
-  --sqrt_price_limit_x64 0
-
-# Direct swap (usually via Router)
-stellar contract invoke --id $POOL --source $SOURCE --network $NETWORK \
-  -- swap \
-  --sender $USER \
-  --token_in $TOKEN_A \
-  --amount_in 10000000 \
-  --amount_out_min 9000000 \
-  --sqrt_price_limit_x64 0
-
-# Add liquidity
-stellar contract invoke --id $POOL --source $SOURCE --network $NETWORK \
-  -- add_liquidity \
-  --owner $USER \
-  --lower_tick -887220 \
-  --upper_tick 887220 \
-  --amount0_desired 10000000000 \
-  --amount1_desired 10000000000 \
-  --amount0_min 0 \
-  --amount1_min 0
+  --token_in "$TOKEN_A" \
+  --amount_in "10000000" \
+  --min_amount_out "0" \
+  --sqrt_price_limit_x64 "0"
 
 # Get position info
-stellar contract invoke --id $POOL --network $NETWORK \
+stellar contract invoke \
+  --id $POOL \
+  --network $NETWORK \
   -- get_position \
-  --owner $USER \
-  --lower_tick -887220 \
-  --upper_tick 887220
+  --owner "$USER" \
+  --lower_tick "-887220" \
+  --upper_tick "887220"
 
-# Collect fees
-stellar contract invoke --id $POOL --source $SOURCE --network $NETWORK \
-  -- collect_fees \
-  --owner $USER \
-  --lower_tick -887220 \
-  --upper_tick 887220
+# Get creator fees
+stellar contract invoke \
+  --id $POOL \
+  --network $NETWORK \
+  -- get_creator_fees
+
+# Get swap direction
+stellar contract invoke \
+  --id $POOL \
+  --network $NETWORK \
+  -- get_swap_direction \
+  --token_in "$TOKEN_A"
+
+# Check if initialized
+stellar contract invoke \
+  --id $POOL \
+  --network $NETWORK \
+  -- is_initialized
+
+# Get router address
+stellar contract invoke \
+  --id $POOL \
+  --network $NETWORK \
+  -- get_router
 ```
 
 ---
+
+### Transaction Functions (Require Signing)
+
+These functions modify state and require `--source` for transaction signing:
+
+```bash
+# Direct swap (usually done via Router)
+stellar contract invoke \
+  --id $POOL \
+  --source $SOURCE \
+  --network $NETWORK \
+  -- swap \
+  --sender "$USER" \
+  --token_in "$TOKEN_A" \
+  --amount_in "10000000" \
+  --amount_out_min "9000000" \
+  --sqrt_price_limit_x64 "0"
+
+# Add liquidity
+stellar contract invoke \
+  --id $POOL \
+  --source $SOURCE \
+  --network $NETWORK \
+  -- add_liquidity \
+  --owner "$USER" \
+  --lower_tick "-887220" \
+  --upper_tick "887220" \
+  --amount0_desired "10000000000" \
+  --amount1_desired "10000000000" \
+  --amount0_min "0" \
+  --amount1_min "0"
+
+# Remove liquidity
+stellar contract invoke \
+  --id $POOL \
+  --source $SOURCE \
+  --network $NETWORK \
+  -- remove_liquidity \
+  --owner "$USER" \
+  --lower_tick "-887220" \
+  --upper_tick "887220" \
+  --liquidity "1000000" \
+  --amount0_min "0" \
+  --amount1_min "0"
+
+# Collect LP fees
+stellar contract invoke \
+  --id $POOL \
+  --source $SOURCE \
+  --network $NETWORK \
+  -- collect_fees \
+  --owner "$USER" \
+  --lower_tick "-887220" \
+  --upper_tick "887220"
+
+# Claim creator fees (creator only)
+stellar contract invoke \
+  --id $POOL \
+  --source $SOURCE \
+  --network $NETWORK \
+  -- claim_creator_fees
+```
+
 
 ## 🔗 Links
 
 - **Repository**: [github.com/Beluga-Swap/core](https://github.com/Beluga-Swap/core)
 - **Factory Contract**: [contracts/factory](../factory/README.md)
 - **Router Contract**: [contracts/router](../router/README.md)
+
+---
+
+**Last Updated:** February 2026  
+**Soroban Version:** v25+  

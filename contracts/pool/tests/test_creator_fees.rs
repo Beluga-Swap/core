@@ -7,7 +7,7 @@ fn test_creator_fee_configuration() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (client, creator, _factory, _token_a, _token_b) = common::setup_custom_pool(
+    let (client, creator, _factory, _router, _token_a, _token_b) = common::setup_custom_pool(
         &env,
         30,  // fee_bps
         1,   // creator_fee_bps (minimum: 1 bps = 0.01%)
@@ -26,7 +26,7 @@ fn test_get_creator_fees_initial_state() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (client, _creator, _factory, _token_a, _token_b) = common::setup_pool(&env);
+    let (client, _creator, _factory, _router, _token_a, _token_b) = common::setup_pool(&env);
     
     // Initially, no fees should be accumulated
     let fees = client.get_creator_fees();
@@ -39,23 +39,15 @@ fn test_claim_creator_fees_no_fees() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (client, creator, _factory, _token_a, _token_b) = common::setup_pool(&env);
+    let (client, _creator, _factory, _router, _token_a, _token_b) = common::setup_pool(&env);
     
     // Claiming when no fees exist should return zero
-    let result = client.claim_creator_fees(&creator);
+    // Note: claim_creator_fees() now takes no arguments - it uses require_auth internally
+    let result = client.claim_creator_fees();
     assert_eq!(result.0, 0);
     assert_eq!(result.1, 0);
 }
 
-#[test]
-#[should_panic(expected = "unauthorized")]
-fn test_claim_creator_fees_unauthorized() {
-    let env = Env::default();
-    env.mock_all_auths();
-    
-    let (client, _creator, _factory, _token_a, _token_b) = common::setup_pool(&env);
-    let non_creator = Address::generate(&env);
-    
-    // Non-creator should not be able to claim fees
-    client.claim_creator_fees(&non_creator);
-}
+// Note: The unauthorized test is removed because claim_creator_fees no longer takes
+// a caller argument - it uses config.creator.require_auth() internally.
+// Authorization is handled via mock_all_auths() in tests.

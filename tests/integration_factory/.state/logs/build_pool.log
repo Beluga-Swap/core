@@ -1,0 +1,37 @@
+warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
+package:   /Users/bsetyawan/Downloads/belugaswap-core/contracts/factory/Cargo.toml
+workspace: /Users/bsetyawan/Downloads/belugaswap-core/Cargo.toml
+warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
+package:   /Users/bsetyawan/Downloads/belugaswap-core/contracts/pool/Cargo.toml
+workspace: /Users/bsetyawan/Downloads/belugaswap-core/Cargo.toml
+warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
+package:   /Users/bsetyawan/Downloads/belugaswap-core/contracts/router/Cargo.toml
+workspace: /Users/bsetyawan/Downloads/belugaswap-core/Cargo.toml
+warning: unused import: `mul_div`
+ --> packages/swap/src/engine.rs:5:5
+  |
+5 |     mul_div,
+  |     ^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `belugaswap-swap` (lib) generated 1 warning (run `cargo fix --lib -p belugaswap-swap` to apply 1 suggestion)
+warning: function `calculate_expected_output_at_spot` is never used
+   --> contracts/pool/src/lib.rs:804:4
+    |
+804 | fn calculate_expected_output_at_spot(
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: associated constant `SAME_TOKEN` is never used
+   --> contracts/pool/src/error.rs:143:15
+    |
+136 | impl ErrorMsg {
+    | ------------- associated constant in this implementation
+...
+143 |     pub const SAME_TOKEN: &'static str = "input and output tokens are t...
+    |               ^^^^^^^^^^
+
+warning: `belugaswap-pool` (lib) generated 2 warnings
+    Finished `release` profile [optimized] target(s) in 0.03s

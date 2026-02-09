@@ -8,7 +8,7 @@ fn test_edge_tick_boundaries() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (client, _creator, _factory, _token_a, _token_b) = common::setup_pool(&env);
+    let (client, _creator, _factory, _router, _token_a, _token_b) = common::setup_pool(&env);
     let lp = Address::generate(&env);
     
     // Try to add liquidity at extreme tick boundaries
@@ -29,7 +29,7 @@ fn test_unaligned_ticks() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (client, _creator, _factory, _token_a, _token_b) = common::setup_pool(&env);
+    let (client, _creator, _factory, _router, _token_a, _token_b) = common::setup_pool(&env);
     let lp = Address::generate(&env);
     
     // Ticks not aligned to tick spacing (60)

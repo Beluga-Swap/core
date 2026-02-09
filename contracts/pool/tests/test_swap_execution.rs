@@ -8,7 +8,7 @@ fn test_swap_invalid_token() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (client, creator, _factory, _token_a, _token_b) = common::setup_pool(&env);
+    let (client, creator, _factory, _router, _token_a, _token_b) = common::setup_pool(&env);
     let sender = Address::generate(&env);
     
     // Create invalid token
@@ -29,7 +29,7 @@ fn test_swap_slippage_exceeded() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (client, _, _, _, _) = common::setup_pool(&env);
+    let (client, _, _, _, _, _) = common::setup_pool(&env);
     let state = client.get_pool_state();
     let sender = Address::generate(&env);
     

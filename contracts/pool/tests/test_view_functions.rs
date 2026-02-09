@@ -7,7 +7,7 @@ fn test_get_pool_state() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (client, _creator, _factory, _token_a, _token_b) = common::setup_pool(&env);
+    let (client, _creator, _factory, _router, _token_a, _token_b) = common::setup_pool(&env);
     
     let state = client.get_pool_state();
     
@@ -23,7 +23,7 @@ fn test_get_pool_config() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (client, creator, _factory, _token_a, _token_b) = common::setup_pool(&env);
+    let (client, creator, _factory, _router, _token_a, _token_b) = common::setup_pool(&env);
     
     let config = client.get_pool_config();
     
@@ -38,7 +38,7 @@ fn test_get_position_empty() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (client, _creator, _factory, _token_a, _token_b) = common::setup_pool(&env);
+    let (client, _creator, _factory, _router, _token_a, _token_b) = common::setup_pool(&env);
     let user = Address::generate(&env);
     
     let position = client.get_position(&user, &-600, &600);
@@ -54,7 +54,7 @@ fn test_is_initialized() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (client, _creator, _factory, _token_a, _token_b) = common::setup_pool(&env);
+    let (client, _creator, _factory, _router, _token_a, _token_b) = common::setup_pool(&env);
     
     assert!(client.is_initialized());
 }

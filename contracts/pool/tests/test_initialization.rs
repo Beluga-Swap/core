@@ -8,7 +8,7 @@ fn test_initialization_success() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (client, creator, _factory, _token_a, _token_b) = common::setup_pool(&env);
+    let (client, creator, _factory, _router, _token_a, _token_b) = common::setup_pool(&env);
     
     // Check initialization
     assert!(client.is_initialized());
@@ -38,15 +38,17 @@ fn test_double_initialization() {
     
     let creator = Address::generate(&env);
     let factory = Address::generate(&env);
+    let router = Address::generate(&env);
     let token_a = common::create_token(&env, &creator);
     let token_b = common::create_token(&env, &creator);
     
-    let pool_id = env.register_contract(None, BelugaPool);
+    let pool_id = env.register(BelugaPool, ());
     let client = BelugaPoolClient::new(&env, &pool_id);
     
     // First init
     client.initialize(
         &factory,
+        &router,
         &creator,
         &token_a,
         &token_b,
@@ -60,6 +62,7 @@ fn test_double_initialization() {
     // Second init should panic
     client.initialize(
         &factory,
+        &router,
         &creator,
         &token_a,
         &token_b,
@@ -79,14 +82,16 @@ fn test_invalid_fee_zero() {
     
     let creator = Address::generate(&env);
     let factory = Address::generate(&env);
+    let router = Address::generate(&env);
     let token_a = common::create_token(&env, &creator);
     let token_b = common::create_token(&env, &creator);
     
-    let pool_id = env.register_contract(None, BelugaPool);
+    let pool_id = env.register(BelugaPool, ());
     let client = BelugaPoolClient::new(&env, &pool_id);
     
     client.initialize(
         &factory,
+        &router,
         &creator,
         &token_a,
         &token_b,
@@ -106,14 +111,16 @@ fn test_invalid_fee_too_high() {
     
     let creator = Address::generate(&env);
     let factory = Address::generate(&env);
+    let router = Address::generate(&env);
     let token_a = common::create_token(&env, &creator);
     let token_b = common::create_token(&env, &creator);
     
-    let pool_id = env.register_contract(None, BelugaPool);
+    let pool_id = env.register(BelugaPool, ());
     let client = BelugaPoolClient::new(&env, &pool_id);
     
     client.initialize(
         &factory,
+        &router,
         &creator,
         &token_a,
         &token_b,
@@ -133,14 +140,16 @@ fn test_invalid_creator_fee_too_low() {
     
     let creator = Address::generate(&env);
     let factory = Address::generate(&env);
+    let router = Address::generate(&env);
     let token_a = common::create_token(&env, &creator);
     let token_b = common::create_token(&env, &creator);
     
-    let pool_id = env.register_contract(None, BelugaPool);
+    let pool_id = env.register(BelugaPool, ());
     let client = BelugaPoolClient::new(&env, &pool_id);
     
     client.initialize(
         &factory,
+        &router,
         &creator,
         &token_a,
         &token_b,
@@ -160,14 +169,16 @@ fn test_invalid_creator_fee_too_high() {
     
     let creator = Address::generate(&env);
     let factory = Address::generate(&env);
+    let router = Address::generate(&env);
     let token_a = common::create_token(&env, &creator);
     let token_b = common::create_token(&env, &creator);
     
-    let pool_id = env.register_contract(None, BelugaPool);
+    let pool_id = env.register(BelugaPool, ());
     let client = BelugaPoolClient::new(&env, &pool_id);
     
     client.initialize(
         &factory,
+        &router,
         &creator,
         &token_a,
         &token_b,
@@ -187,14 +198,16 @@ fn test_invalid_tick_spacing_zero() {
     
     let creator = Address::generate(&env);
     let factory = Address::generate(&env);
+    let router = Address::generate(&env);
     let token_a = common::create_token(&env, &creator);
     let token_b = common::create_token(&env, &creator);
     
-    let pool_id = env.register_contract(None, BelugaPool);
+    let pool_id = env.register(BelugaPool, ());
     let client = BelugaPoolClient::new(&env, &pool_id);
     
     client.initialize(
         &factory,
+        &router,
         &creator,
         &token_a,
         &token_b,
@@ -214,14 +227,16 @@ fn test_invalid_tick_spacing_negative() {
     
     let creator = Address::generate(&env);
     let factory = Address::generate(&env);
+    let router = Address::generate(&env);
     let token_a = common::create_token(&env, &creator);
     let token_b = common::create_token(&env, &creator);
     
-    let pool_id = env.register_contract(None, BelugaPool);
+    let pool_id = env.register(BelugaPool, ());
     let client = BelugaPoolClient::new(&env, &pool_id);
     
     client.initialize(
         &factory,
+        &router,
         &creator,
         &token_a,
         &token_b,
@@ -240,15 +255,17 @@ fn test_token_sorting() {
     
     let creator = Address::generate(&env);
     let factory = Address::generate(&env);
+    let router = Address::generate(&env);
     let token_a = common::create_token(&env, &creator);
     let token_b = common::create_token(&env, &creator);
     
-    let pool_id = env.register_contract(None, BelugaPool);
+    let pool_id = env.register(BelugaPool, ());
     let client = BelugaPoolClient::new(&env, &pool_id);
     
     // Initialize with tokens (may be in any order)
     client.initialize(
         &factory,
+        &router,
         &creator,
         &token_a,
         &token_b,

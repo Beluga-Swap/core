@@ -1,0 +1,19 @@
+warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
+package:   /Users/bsetyawan/Downloads/belugaswap-core/contracts/factory/Cargo.toml
+workspace: /Users/bsetyawan/Downloads/belugaswap-core/Cargo.toml
+warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
+package:   /Users/bsetyawan/Downloads/belugaswap-core/contracts/pool/Cargo.toml
+workspace: /Users/bsetyawan/Downloads/belugaswap-core/Cargo.toml
+warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
+package:   /Users/bsetyawan/Downloads/belugaswap-core/contracts/router/Cargo.toml
+workspace: /Users/bsetyawan/Downloads/belugaswap-core/Cargo.toml
+warning: use of deprecated method `soroban_sdk::deploy::DeployerWithAddress::deploy`: use deploy_v2
+   --> contracts/factory/src/lib.rs:507:14
+    |
+507 |             .deploy(config.pool_wasm_hash.clone())
+    |              ^^^^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: `beluga-factory` (lib) generated 1 warning
+    Finished `release` profile [optimized] target(s) in 0.04s

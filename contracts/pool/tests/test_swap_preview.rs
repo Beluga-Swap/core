@@ -7,7 +7,7 @@ fn test_pool_initialized_state() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (client, _creator, _factory, _token_a, _token_b) = common::setup_pool(&env);
+    let (client, _creator, _factory, _router, _token_a, _token_b) = common::setup_pool(&env);
     
     // Pool should be initialized
     assert!(client.is_initialized());

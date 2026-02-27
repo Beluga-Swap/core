@@ -2,7 +2,6 @@ use soroban_sdk::{Env, Symbol};
 use belugaswap_math::{
     constants::{MAX_SLIPPAGE_BPS, MAX_SWAP_ITERATIONS, MIN_OUTPUT_AMOUNT, MIN_SWAP_AMOUNT},
     compute_swap_step_with_target, div_q64, get_sqrt_ratio_at_tick,
-    mul_div,
 };
 use belugaswap_tick::TickInfo;
 

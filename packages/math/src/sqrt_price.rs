@@ -42,6 +42,12 @@ pub fn get_sqrt_ratio_at_tick(tick: i32) -> u128 {
     if abs_tick & 0x4000 != 0 { ratio = mul_q64(ratio, 41848122137991208960); }  // was: 40198444615281172480
     if abs_tick & 0x8000 != 0 { ratio = mul_q64(ratio, 94936283578203242496); }  // was: 87150709742682460160
     if abs_tick & 0x10000 != 0 { ratio = mul_q64(ratio, 488590176327446167552); }  // was: 409916713094318874624
+    // Bits 0x20000..0x80000 are required because MAX_TICK (887272) sets bits up
+    // to 2^19. Without these the high tick bits were silently dropped, making
+    // sqrt prices wrong (and non-monotonic) for |tick| >= 131072.
+    if abs_tick & 0x20000 != 0 { ratio = mul_q64(ratio, 12941056668319229769861); }
+    if abs_tick & 0x40000 != 0 { ratio = mul_q64(ratio, 9078618265828848800676190); }
+    if abs_tick & 0x80000 != 0 { ratio = mul_q64(ratio, 4468068147273140139091016147738); }
 
     if tick < 0 {
         if ratio == 0 { return u128::MAX; }

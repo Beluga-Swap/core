@@ -151,7 +151,7 @@ impl BelugaPool {
             state.fee_growth_global_1,
         );
         
-        let (pending0, pending1) = calculate_pending_fees(&pos, fee_growth_inside.0, fee_growth_inside.1);
+        let (pending0, pending1) = calculate_pending_fees(&env, &pos, fee_growth_inside.0, fee_growth_inside.1);
         
         PositionInfo {
             liquidity: pos.liquidity,
@@ -456,7 +456,7 @@ impl BelugaPool {
             state.fee_growth_global_1,
         );
         
-        update_position(&mut pos, fee_growth_inside.0, fee_growth_inside.1);
+        update_position(&env, &mut pos, fee_growth_inside.0, fee_growth_inside.1);
         
         // Subtract liquidity from position
         pos.liquidity = pos.liquidity.saturating_sub(liquidity);
@@ -533,7 +533,7 @@ impl BelugaPool {
             state.fee_growth_global_1,
         );
         
-        let (pending0, pending1) = calculate_pending_fees(&pos, fee_growth_inside.0, fee_growth_inside.1);
+        let (pending0, pending1) = calculate_pending_fees(&env, &pos, fee_growth_inside.0, fee_growth_inside.1);
         
         let fees0 = pos.tokens_owed_0.saturating_add(pending0);
         let fees1 = pos.tokens_owed_1.saturating_add(pending1);
@@ -697,7 +697,7 @@ impl BelugaPool {
         );
         
         let mut pos = read_position(env, owner, lower_aligned, upper_aligned);
-        modify_position(&mut pos, liquidity, fee_growth_inside.0, fee_growth_inside.1);
+        modify_position(env, &mut pos, liquidity, fee_growth_inside.0, fee_growth_inside.1);
         write_position(env, owner, lower_aligned, upper_aligned, &pos);
         
         (liquidity, amount0, amount1)

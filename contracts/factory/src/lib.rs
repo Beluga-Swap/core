@@ -215,7 +215,7 @@ impl BelugaFactory {
         // === INITIALIZE POOL ===
         let factory_address = env.current_contract_address();
         let router_address = config.router.unwrap(); // Safe: checked above
-        let current_tick = Self::sqrt_price_to_tick(initial_sqrt_price_x64);
+        let current_tick = belugaswap_math::get_tick_at_sqrt_ratio(initial_sqrt_price_x64);
         
         let _: () = env.invoke_contract(
             &pool_address,
@@ -532,21 +532,4 @@ impl BelugaFactory {
             .deploy(config.pool_wasm_hash.clone())
     }
     
-    fn sqrt_price_to_tick(sqrt_price_x64: u128) -> i32 {
-        const ONE_X64: u128 = 1u128 << 64;
-        
-        if sqrt_price_x64 == ONE_X64 {
-            return 0;
-        }
-        
-        if sqrt_price_x64 > ONE_X64 {
-            let ratio = sqrt_price_x64 / ONE_X64;
-            if ratio == 0 { return 0; }
-            (ratio.ilog2() as i32) * 6932
-        } else {
-            let ratio = ONE_X64 / sqrt_price_x64.max(1);
-            if ratio == 0 { return 0; }
-            -((ratio.ilog2() as i32) * 6932)
-        }
-    }
 }

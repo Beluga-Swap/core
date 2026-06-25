@@ -1,5 +1,7 @@
 // Position Management Logic
 
+use soroban_sdk::Env;
+use belugaswap_math::{mul_div, ONE_X64};
 use crate::types::Position;
 
 /// Update a position's fee checkpoints and calculate owed tokens
@@ -9,6 +11,7 @@ use crate::types::Position;
 /// 2. owed_tokens += liquidity * delta / 2^64
 /// 3. Update last_inside = current_inside
 pub fn update_position(
+    env: &Env,
     pos: &mut Position,
     fee_growth_inside_0: u128,
     fee_growth_inside_1: u128,
@@ -20,16 +23,12 @@ pub fn update_position(
         let delta_0 = fee_growth_inside_0.wrapping_sub(pos.fee_growth_inside_last_0);
         let delta_1 = fee_growth_inside_1.wrapping_sub(pos.fee_growth_inside_last_1);
 
-        // Calculate owed fees with overflow protection
-        let fee_0 = liquidity_u
-            .checked_mul(delta_0)
-            .map(|product| product >> 64)
-            .unwrap_or(0);
-
-        let fee_1 = liquidity_u
-            .checked_mul(delta_1)
-            .map(|product| product >> 64)
-            .unwrap_or(0);
+        // owed = (liquidity * delta) >> 64, computed in 256-bit to avoid
+        // overflowing u128. The previous `checked_mul(..).unwrap_or(0)` silently
+        // dropped ALL fees for large positions whose liquidity*delta exceeded
+        // u128 — this makes the accounting exact instead.
+        let fee_0 = mul_div(env, liquidity_u, delta_0, ONE_X64);
+        let fee_1 = mul_div(env, liquidity_u, delta_1, ONE_X64);
 
         // Accumulate owed tokens with saturation
         pos.tokens_owed_0 = pos.tokens_owed_0.saturating_add(fee_0);
@@ -47,13 +46,14 @@ pub fn update_position(
 /// 1. First update fees based on current fee_growth_inside
 /// 2. Then adjust liquidity
 pub fn modify_position(
+    env: &Env,
     pos: &mut Position,
     liquidity_delta: i128,
     fee_growth_inside_0: u128,
     fee_growth_inside_1: u128,
 ) {
     // First update fees
-    update_position(pos, fee_growth_inside_0, fee_growth_inside_1);
+    update_position(env, pos, fee_growth_inside_0, fee_growth_inside_1);
 
     // Then adjust liquidity
     if liquidity_delta > 0 {

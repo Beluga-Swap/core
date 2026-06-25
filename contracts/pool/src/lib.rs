@@ -375,9 +375,14 @@ impl BelugaPool {
         amount0_desired: i128,
         amount1_desired: i128,
     ) -> i128 {
-        // No auth required - factory handles this
+        // SECURITY: mint credits a position WITHOUT pulling tokens (the factory
+        // transfers them beforehand during create_pool). It must therefore only
+        // be callable by the factory, otherwise anyone could mint a free position
+        // and drain the pool via remove_liquidity. Require the factory to
+        // authorize this call (mirrors `initialize`).
+        read_pool_config(&env).factory.require_auth();
         // Tokens already transferred by factory
-        
+
         let (liquidity, amount0, amount1) = Self::internal_add_liquidity(
             &env,
             &owner,

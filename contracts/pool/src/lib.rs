@@ -276,7 +276,7 @@ impl BelugaPool {
             fee_growth_global_1: pool_state.fee_growth_global_1,
         };
         
-        let (amount_in_used, amount_out) = engine_swap(
+        let (amount_in_used, amount_out, creator_fee) = engine_swap(
             &env,
             &mut swap_state,
             |e, t| read_tick_info(e, t),
@@ -300,6 +300,19 @@ impl BelugaPool {
         updated_pool.liquidity = swap_state.liquidity;
         updated_pool.fee_growth_global_0 = swap_state.fee_growth_global_0;
         updated_pool.fee_growth_global_1 = swap_state.fee_growth_global_1;
+
+        // Credit the creator fee. It is carved out of the LP fee inside the swap
+        // engine and is denominated in the input token, and the swapper already
+        // transferred it in as part of amount_in_used — so we only need to record
+        // the claim here (claim_creator_fees pays it out later).
+        if creator_fee > 0 {
+            let cf = creator_fee as u128;
+            if zero_for_one {
+                updated_pool.creator_fees_0 = updated_pool.creator_fees_0.saturating_add(cf);
+            } else {
+                updated_pool.creator_fees_1 = updated_pool.creator_fees_1.saturating_add(cf);
+            }
+        }
         write_pool_state(&env, &updated_pool);
         
         // Transfer tokens

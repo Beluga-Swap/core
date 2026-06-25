@@ -53,7 +53,7 @@ pub fn engine_swap<F1, F2, F3>(
     sqrt_price_limit_x64: u128,
     fee_bps: i128,
     creator_fee_bps: i128,
-) -> (i128, i128)
+) -> (i128, i128, i128)
 where
     F1: Fn(&Env, i32) -> TickInfo,
     F2: Fn(&Env, i32, &TickInfo),
@@ -64,7 +64,7 @@ where
     }
 
     if amount_specified <= 0 {
-        return (0, 0);
+        return (0, 0, 0);
     }
 
     if state.liquidity <= 0 {
@@ -110,7 +110,7 @@ where
     // Clone state for simulation (doesn't modify original)
     let mut sim_state = state.clone();
 
-    let (amount_in_used, amount_out) = engine_swap_internal(
+    let (amount_in_used, amount_out, _creator_fee) = engine_swap_internal(
         env,
         &mut sim_state,
         read_tick,
@@ -295,7 +295,7 @@ fn engine_swap_internal<F1, F2, F3>(
     creator_fee_bps: i128,
     allow_panic: bool,
     dry_run: bool,
-) -> (i128, i128)
+) -> (i128, i128, i128)
 where
     F1: Fn(&Env, i32) -> TickInfo,
     F2: Fn(&Env, i32, &TickInfo),
@@ -509,7 +509,7 @@ where
         if allow_panic {
             panic!("output amount too small");
         } else {
-            return (0, 0);
+            return (0, 0, 0);
         }
     }
 
@@ -522,7 +522,7 @@ where
     emit_sync(env, state.current_tick, state.sqrt_price_x64);
 
     let amount_in_total = amount_specified.saturating_sub(amount_remaining);
-    (amount_in_total, amount_out_total)
+    (amount_in_total, amount_out_total, total_creator_fee)
 }
 
 // ============================================================

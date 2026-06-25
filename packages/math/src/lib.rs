@@ -23,7 +23,8 @@ pub use q64::{
 
 // Re-export sqrt price functions
 pub use sqrt_price::{
-    get_sqrt_ratio_at_tick, 
+    get_sqrt_ratio_at_tick,
+    get_tick_at_sqrt_ratio,  // <-- ADDED: inverse (price -> tick)
     tick_to_sqrt_price_x64,  // <-- ADDED: alias function
     get_next_sqrt_price_from_input, 
     get_next_sqrt_price_from_output,

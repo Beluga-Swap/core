@@ -6,7 +6,7 @@
 // well under 1 ppm versus high-precision reference values.
 
 use belugaswap_math::constants::{MAX_TICK, MIN_TICK};
-use belugaswap_math::sqrt_price::get_sqrt_ratio_at_tick;
+use belugaswap_math::sqrt_price::{get_sqrt_ratio_at_tick, get_tick_at_sqrt_ratio};
 
 // High-precision reference values: sqrt(1.0001^tick) * 2^64, rounded.
 // Generated independently with 90-digit Decimal arithmetic.
@@ -118,4 +118,32 @@ fn test_sqrt_ratio_strict_across_bit_carry_boundaries() {
         let after = get_sqrt_ratio_at_tick(b + 1);
         assert!(before < at && at < after, "non-strict near tick {}", b);
     }
+}
+
+#[test]
+fn test_get_tick_at_sqrt_ratio_round_trips() {
+    // For any tick in the practical range, ratio(t) maps back to exactly t.
+    for &t in &[
+        -300_000, -131_072, -60_000, -4096, -600, -60, -1, 0, 1, 60, 600, 4096,
+        60_000, 131_072, 300_000,
+    ] {
+        let ratio = get_sqrt_ratio_at_tick(t);
+        let back = get_tick_at_sqrt_ratio(ratio);
+        assert_eq!(back, t, "round-trip failed for tick {} (got {})", t, back);
+    }
+}
+
+#[test]
+fn test_get_tick_at_sqrt_ratio_floor_and_clamp() {
+    // Price 1.0 -> tick 0.
+    assert_eq!(get_tick_at_sqrt_ratio(1u128 << 64), 0);
+
+    // A price strictly between ratio(1000) and ratio(1001) floors to 1000.
+    let mid = get_sqrt_ratio_at_tick(1000) + 1;
+    assert!(mid < get_sqrt_ratio_at_tick(1001));
+    assert_eq!(get_tick_at_sqrt_ratio(mid), 1000);
+
+    // Clamps at the ends.
+    assert_eq!(get_tick_at_sqrt_ratio(0), MIN_TICK);
+    assert_eq!(get_tick_at_sqrt_ratio(u128::MAX), MAX_TICK);
 }

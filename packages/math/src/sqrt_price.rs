@@ -63,6 +63,37 @@ pub fn tick_to_sqrt_price_x64(_env: &Env, tick: i32) -> u128 {
     get_sqrt_ratio_at_tick(tick)
 }
 
+/// Inverse of `get_sqrt_ratio_at_tick`: the largest tick whose sqrt ratio is
+/// <= the given Q64.64 sqrt price.
+///
+/// Used to derive a pool's initial tick from its initial price so that tick and
+/// price stay consistent (`ratio(tick) <= sqrt_price < ratio(tick + 1)`). This
+/// replaces a coarse `ilog2`-based approximation that could place the initial
+/// tick far from the true price. Binary search over the full tick range (~21
+/// steps), exact against the same constants used for the forward conversion.
+pub fn get_tick_at_sqrt_ratio(sqrt_price_x64: u128) -> i32 {
+    if sqrt_price_x64 <= get_sqrt_ratio_at_tick(MIN_TICK) {
+        return MIN_TICK;
+    }
+    if sqrt_price_x64 >= get_sqrt_ratio_at_tick(MAX_TICK) {
+        return MAX_TICK;
+    }
+
+    let mut lo = MIN_TICK;
+    let mut hi = MAX_TICK;
+    while lo < hi {
+        // Bias the midpoint upward so the search converges to the largest tick
+        // whose ratio is still <= sqrt_price_x64.
+        let mid = lo + (hi - lo + 1) / 2;
+        if get_sqrt_ratio_at_tick(mid) <= sqrt_price_x64 {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    lo
+}
+
 /// Calculate next sqrt price given input amount
 pub fn get_next_sqrt_price_from_input(
     env: &Env,

@@ -529,7 +529,7 @@ impl BelugaFactory {
         
         env.deployer()
             .with_current_contract(salt)
-            .deploy(config.pool_wasm_hash.clone())
+            .deploy_v2(config.pool_wasm_hash.clone(), ())
     }
     
 }

@@ -4,7 +4,7 @@
 use soroban_sdk::{contracttype, Address, Env};
 use belugaswap_tick::TickInfo;
 use belugaswap_position::Position;
-use crate::types::{PoolConfig, PoolState, TWAPObservation};
+use crate::types::{PoolConfig, PoolState};
 
 // ============================================================
 // STORAGE KEYS
@@ -17,9 +17,6 @@ pub enum DataKey {
     Initialized,
     Tick(i32),
     Position(Address, i32, i32),
-    TWAPObservation(u32),
-    TWAPNewestIndex,
-    TWAPInitialized,
 }
 
 // ============================================================
@@ -136,54 +133,6 @@ pub fn read_position(env: &Env, owner: &Address, lower: i32, upper: i32) -> Posi
 }
 
 // ============================================================
-// TWAP STORAGE (Reserved for future use)
-// ============================================================
-
-#[allow(dead_code)]
-pub fn write_twap_observation(env: &Env, index: u32, obs: &TWAPObservation) {
-    let key = DataKey::TWAPObservation(index);
-    env.storage().persistent().set(&key, obs);
-    extend_persistent_ttl(env, &key);
-}
-
-#[allow(dead_code)]
-pub fn read_twap_observation(env: &Env, index: u32) -> TWAPObservation {
-    env.storage()
-        .persistent()
-        .get(&DataKey::TWAPObservation(index))
-        .unwrap_or_default()
-}
-
-#[allow(dead_code)]
-pub fn set_twap_newest_index(env: &Env, index: u32) {
-    env.storage()
-        .persistent()
-        .set(&DataKey::TWAPNewestIndex, &index);
-    extend_persistent_ttl(env, &DataKey::TWAPNewestIndex);
-}
-
-#[allow(dead_code)]
-pub fn get_twap_newest_index(env: &Env) -> u32 {
-    env.storage()
-        .persistent()
-        .get(&DataKey::TWAPNewestIndex)
-        .unwrap_or(0)
-}
-
-#[allow(dead_code)]
-pub fn is_twap_initialized(env: &Env) -> bool {
-    env.storage().persistent().has(&DataKey::TWAPInitialized)
-}
-
-#[allow(dead_code)]
-pub fn set_twap_initialized(env: &Env) {
-    env.storage()
-        .persistent()
-        .set(&DataKey::TWAPInitialized, &true);
-    extend_persistent_ttl(env, &DataKey::TWAPInitialized);
-}
-
-// ============================================================
 // TTL MANAGEMENT
 // ============================================================
 
@@ -193,13 +142,4 @@ fn extend_persistent_ttl(env: &Env, key: &DataKey) {
         storage_ttl::PERSISTENT_LIFETIME_THRESHOLD,
         storage_ttl::PERSISTENT_BUMP_AMOUNT,
     );
-}
-
-#[allow(dead_code)]
-pub fn extend_all_ttl(env: &Env) {
-    if is_initialized(env) {
-        extend_persistent_ttl(env, &DataKey::Initialized);
-        extend_persistent_ttl(env, &DataKey::PoolConfig);
-        extend_persistent_ttl(env, &DataKey::PoolState);
-    }
 }

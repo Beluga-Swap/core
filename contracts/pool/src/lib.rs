@@ -6,7 +6,8 @@ use soroban_sdk::{
 
 // External packages
 use belugaswap_math::{
-    get_amounts_for_liquidity, get_amounts_for_liquidity_rounding_up, get_liquidity_for_amounts,snap_tick_to_spacing, 
+    get_amounts_for_liquidity, get_amounts_for_liquidity_rounding_up, get_liquidity_for_amounts,
+    get_tick_at_sqrt_ratio,snap_tick_to_spacing, 
     MIN_LIQUIDITY, get_sqrt_ratio_at_tick, 
     constants::{MAX_CREATOR_FEE_BPS, MAX_FEE_BPS, MAX_TICK, MIN_CREATOR_FEE_BPS, MIN_TICK}
 };
@@ -33,20 +34,9 @@ impl BelugaPool {
     // INITIALIZATION
     // ========================================================
     
-    /// Initialize pool
-    /// 
-    /// # Arguments
-    /// * `factory` - Factory contract address
-    /// * `router` - Router contract address (for authorized swaps)
-    /// * `creator` - Pool creator address
-    /// * `token_a` - First token
-    /// * `token_b` - Second token
-    /// * `fee_bps` - Trading fee in basis points
-    /// * `creator_fee_bps` - Creator's share of fees
-    /// * `sqrt_price_x64` - Initial sqrt price
-    /// * `current_tick` - Initial tick
-    /// * `tick_spacing` - Tick spacing for this fee tier
-    pub fn initialize(
+/// Deploy-time setup. The factory deploys and initializes a pool in one
+    /// step, so nobody can initialize it first.
+    pub fn __constructor(
         env: Env,
         factory: Address,
         router: Address,
@@ -56,35 +46,30 @@ impl BelugaPool {
         fee_bps: u32,
         creator_fee_bps: u32,
         sqrt_price_x64: u128,
-        current_tick: i32,
         tick_spacing: i32,
     ) {
-        // Factory must authorize (proves caller is factory contract)
-        factory.require_auth();
-        
-        if is_initialized(&env) {
-            panic_with_error!(&env, PoolError::AlreadyInitialized);
-        }
-        
         if fee_bps == 0 || fee_bps > MAX_FEE_BPS {
             panic_with_error!(&env, PoolError::InvalidFee);
         }
-        
         if !(MIN_CREATOR_FEE_BPS..=MAX_CREATOR_FEE_BPS).contains(&creator_fee_bps) {
             panic_with_error!(&env, PoolError::InvalidCreatorFee);
         }
-        
         if tick_spacing <= 0 {
             panic_with_error!(&env, PoolError::InvalidTickSpacing);
         }
-        
+        if !(get_sqrt_ratio_at_tick(MIN_TICK)..=get_sqrt_ratio_at_tick(MAX_TICK)).contains(&sqrt_price_x64) {
+            panic_with_error!(&env, PoolError::InvalidTick);
+        }
+        // Derived here so tick and price can never disagree.
+        let current_tick = get_tick_at_sqrt_ratio(sqrt_price_x64);
+
         let (token0, token1) = if token_a < token_b {
             (token_a.clone(), token_b.clone())
         } else {
             (token_b.clone(), token_a.clone())
         };
-        
-        let config = PoolConfig {
+
+        write_pool_config(&env, &PoolConfig {
             factory,
             router,
             creator,
@@ -92,12 +77,10 @@ impl BelugaPool {
             token_b,
             fee_bps,
             creator_fee_bps,
-        };
-        
-        write_pool_config(&env, &config);
+        });
         init_pool_state(&env, sqrt_price_x64, current_tick, tick_spacing, token0, token1);
-        set_initialized(&env);
-        
+        extend_instance(&env);
+
         emit_initialized(&env, fee_bps, creator_fee_bps, tick_spacing);
         emit_pool_init(&env, sqrt_price_x64, current_tick, tick_spacing);
     }
@@ -106,10 +89,6 @@ impl BelugaPool {
     // VIEW FUNCTIONS 
     // ========================================================
     
-    /// Check if pool is initialized
-    pub fn is_initialized(env: Env) -> bool {
-        is_initialized(&env)
-    }
     
     /// Get current pool state (price, tick, liquidity)
     pub fn get_pool_state(env: Env) -> PoolState {
@@ -249,6 +228,7 @@ impl BelugaPool {
         amount_out_min: i128,
         sqrt_price_limit_x64: u128,
     ) -> SwapResult {
+        extend_instance(&env);
         sender.require_auth();
         
         // Validate amount_in early
@@ -356,6 +336,7 @@ impl BelugaPool {
         amount0_min: i128,
         amount1_min: i128,
     ) -> (i128, i128, i128) {
+        extend_instance(&env);
         owner.require_auth();
         
         // Delegate to internal function
@@ -394,6 +375,7 @@ impl BelugaPool {
         amount0_desired: i128,
         amount1_desired: i128,
     ) -> i128 {
+        extend_instance(&env);
         // SECURITY: mint credits a position WITHOUT pulling tokens (the factory
         // transfers them beforehand during create_pool). It must therefore only
         // be callable by the factory, otherwise anyone could mint a free position
@@ -439,6 +421,7 @@ impl BelugaPool {
         amount0_min: i128,
         amount1_min: i128,
     ) -> (i128, i128) {
+        extend_instance(&env);
         owner.require_auth();
         
         if liquidity <= 0 {
@@ -548,6 +531,7 @@ impl BelugaPool {
         lower_tick: i32,
         upper_tick: i32,
     ) -> (u128, u128) {
+        extend_instance(&env);
         owner.require_auth();
         
         let state = read_pool_state(&env);
@@ -603,6 +587,7 @@ impl BelugaPool {
     
     /// Claim creator fees (only creator can call)
     pub fn claim_creator_fees(env: Env) -> (u128, u128) {
+        extend_instance(&env);
         let config = read_pool_config(&env);
         config.creator.require_auth();
         

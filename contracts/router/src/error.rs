@@ -7,8 +7,6 @@ use soroban_sdk::contracterror;
 #[repr(u32)]
 pub enum RouterError {
     // Initialization
-    AlreadyInitialized = 1,
-    NotInitialized = 2,
     
     // Swap errors
     InvalidPath = 10,

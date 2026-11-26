@@ -42,10 +42,17 @@ deploy_factory_contract() {
         return 1
     fi
     
+    local pool_wasm_hash=$(load_state "pool_wasm_hash")
+    local admin_address=$(get_admin_address)
+
+    # The factory takes its configuration as constructor arguments
     local factory_id=$(soroban contract deploy \
         --wasm "$factory_wasm" \
         --network "$NETWORK" \
-        --source admin 2>&1 | tail -1)
+        --source admin \
+        -- \
+        --admin "$admin_address" \
+        --pool_wasm_hash "$pool_wasm_hash" 2>&1 | tail -1)
     
     if [ -z "$factory_id" ]; then
         log_error "Failed to deploy factory"
@@ -54,37 +61,6 @@ deploy_factory_contract() {
     
     save_state "factory_id" "$factory_id"
     log_success "Factory deployed: $factory_id"
-}
-
-# Initialize factory
-initialize_factory() {
-    log_info "Initializing factory..."
-    
-    local factory_id=$(load_state "factory_id")
-    local pool_wasm_hash=$(load_state "pool_wasm_hash")
-    local admin_address=$(get_admin_address)
-    
-    if [ -z "$factory_id" ] || [ -z "$pool_wasm_hash" ] || [ -z "$admin_address" ]; then
-        log_error "Missing deployment prerequisites"
-        return 1
-    fi
-    
-    soroban contract invoke \
-        --id "$factory_id" \
-        --network "$NETWORK" \
-        --source admin \
-        -- initialize \
-        --admin "$admin_address" \
-        --pool_wasm_hash "$pool_wasm_hash" \
-        > "$STATE_DIR/logs/init_factory.log" 2>&1
-    
-    if [ $? -ne 0 ]; then
-        log_error "Factory initialization failed"
-        cat "$STATE_DIR/logs/init_factory.log"
-        return 1
-    fi
-    
-    log_success "Factory initialized"
 }
 
 # Deploy test token

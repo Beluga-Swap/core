@@ -175,6 +175,4 @@ pub struct SwapResult {
 pub enum DataKey {
     /// Router config
     Config,
-    /// Initialization flag
-    Initialized,
 }

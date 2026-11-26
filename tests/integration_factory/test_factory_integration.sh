@@ -107,7 +107,6 @@ deploy_contracts() {
     cd "$PROJECT_ROOT"
     deploy_pool_wasm
     deploy_factory_contract
-    initialize_factory
     log_success "Deployed"
 }
 

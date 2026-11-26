@@ -48,13 +48,3 @@ fn test_get_position_empty() {
     assert_eq!(position.amount0, 0);
     assert_eq!(position.amount1, 0);
 }
-
-#[test]
-fn test_is_initialized() {
-    let env = Env::default();
-    env.mock_all_auths();
-    
-    let (client, _creator, _factory, _router, _token_a, _token_b) = common::setup_pool(&env);
-    
-    assert!(client.is_initialized());
-}

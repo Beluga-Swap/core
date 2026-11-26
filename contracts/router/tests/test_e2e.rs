@@ -45,14 +45,15 @@ fn world(env: &Env) -> World<'_> {
     env.cost_estimate().budget().reset_unlimited();
     let admin = Address::generate(env);
     let factory = env.register(MockFactory, ());
-    let router_id = env.register(BelugaRouter, ());
+    let router_id = env.register(BelugaRouter, (&factory, &admin));
     let router = BelugaRouterClient::new(env, &router_id);
-    router.initialize(&factory, &admin);
     let a = env.register_stellar_asset_contract_v2(admin.clone()).address();
     let b = env.register_stellar_asset_contract_v2(admin.clone()).address();
-    let pool_id = env.register(BelugaPool, ());
+    let pool_id = env.register(
+        BelugaPool,
+        (&factory, &router_id, &admin, &a, &b, 30u32, 10u32, 1u128 << 64, 60i32),
+    );
     let pool = BelugaPoolClient::new(env, &pool_id);
-    pool.initialize(&factory, &router_id, &admin, &a, &b, &30, &10, &(1u128 << 64), &0, &60);
     MockFactoryClient::new(env, &factory).set(&pool_id);
     let s = pool.get_pool_state();
     let user = Address::generate(env);

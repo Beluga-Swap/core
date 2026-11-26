@@ -7,8 +7,6 @@ use soroban_sdk::contracterror;
 #[repr(u32)]
 pub enum FactoryError {
     // Initialization
-    AlreadyInitialized = 1,
-    NotInitialized = 2,
     
     // Router
     RouterNotSet = 5,

@@ -3,7 +3,7 @@
 mod common;
 
 use belugaswap_math::get_sqrt_ratio_at_tick;
-use belugaswap_pool::{BelugaPool, BelugaPoolClient};
+use belugaswap_pool::BelugaPoolClient;
 use soroban_sdk::{
     contract, contractimpl, testutils::Address as _, token::TokenClient, Address, Env,
 };
@@ -36,11 +36,7 @@ impl<'a> Pool<'a> {
         let creator = Address::generate(env);
         let a = common::create_token(env, &creator);
         let b = common::create_token(env, &creator);
-        let c = BelugaPoolClient::new(env, &env.register(BelugaPool, ()));
-        c.initialize(
-            &factory, &Address::generate(env), &creator, &a, &b, &30, &10,
-            &get_sqrt_ratio_at_tick(tick), &tick, &60,
-        );
+        let c = common::deploy_pool(env, &factory, &Address::generate(env), &creator, &a, &b, &30, &10, &get_sqrt_ratio_at_tick(tick), &60);
         let s = c.get_pool_state();
         Pool { env, c, t0: s.token0, t1: s.token1 }
     }

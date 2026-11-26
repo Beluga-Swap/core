@@ -3,10 +3,9 @@ use beluga_factory::{BelugaFactory, BelugaFactoryClient, CreatePoolParams};
 
 pub fn setup_factory(env: &Env) -> (BelugaFactoryClient<'_>, Address) {
     let admin = Address::generate(env);
-    let factory_id = env.register_contract(None, BelugaFactory);
-    let client = BelugaFactoryClient::new(env, &factory_id);
     let pool_wasm_hash = BytesN::from_array(env, &[0u8; 32]);
-    client.initialize(&admin, &pool_wasm_hash);
+    let factory_id = env.register(BelugaFactory, (&admin, &pool_wasm_hash));
+    let client = BelugaFactoryClient::new(env, &factory_id);
     (client, admin)
 }
 

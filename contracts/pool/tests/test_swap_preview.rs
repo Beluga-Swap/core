@@ -10,7 +10,6 @@ fn test_pool_initialized_state() {
     let (client, _creator, _factory, _router, _token_a, _token_b) = common::setup_pool(&env);
     
     // Pool should be initialized
-    assert!(client.is_initialized());
     
     // Get state to verify
     let state = client.get_pool_state();

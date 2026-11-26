@@ -12,7 +12,6 @@ fn test_creator_fee_configuration() {
         30,  // fee_bps
         1,   // creator_fee_bps (minimum: 1 bps = 0.01%)
         common::DEFAULT_SQRT_PRICE_X64,
-        common::DEFAULT_TICK,
         common::DEFAULT_TICK_SPACING,
     );
     

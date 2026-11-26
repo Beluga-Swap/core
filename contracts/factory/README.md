@@ -185,14 +185,11 @@ pub fn unlock_creator_liquidity(env: Env, pool: Address) -> Result<(), FactoryEr
 
 ### Admin Functions
 
-#### `initialize`
+#### `__constructor`
 ```rust
-pub fn initialize(
-    env: Env,
-    admin: Address,
-    pool_wasm_hash: BytesN<32>,
-) -> Result<(), FactoryError>
+pub fn __constructor(env: Env, admin: Address, pool_wasm_hash: BytesN<32>)
 ```
+Runs once, at deploy time.
 
 #### `set_router`
 ```rust
@@ -229,8 +226,6 @@ pub fn get_router(env: Env) -> Result<Address, FactoryError>
 
 | Code | Error | Description |
 |------|-------|-------------|
-| 1 | `AlreadyInitialized` | Factory already initialized |
-| 2 | `NotInitialized` | Factory not initialized |
 | 9 | `ExpirationTooHigh` | Approval expiration ledger too high |
 | 10 | `Unauthorized` | Not authorized |
 | 11 | `PoolAlreadyExists` | Pool for pair+fee already deployed |
@@ -275,14 +270,11 @@ export POOL_WASM_HASH=$(stellar contract upload \
   --wasm target/wasm32v1-none/release/belugaswap_pool.wasm \
   --source $SOURCE --network $NETWORK)
 
-# Deploy factory
+# Deploy factory (constructor arguments after --)
 export FACTORY=$(stellar contract deploy \
   --wasm target/wasm32v1-none/release/beluga_factory.wasm \
-  --source $SOURCE --network $NETWORK)
-
-# Initialize
-stellar contract invoke --id $FACTORY --source $SOURCE --network $NETWORK \
-  -- initialize --admin $ADMIN --pool_wasm_hash $POOL_WASM_HASH
+  --source $SOURCE --network $NETWORK \
+  -- --admin $ADMIN --pool_wasm_hash $POOL_WASM_HASH)
 
 # Set router (after router deployment)
 stellar contract invoke --id $FACTORY --source $SOURCE --network $NETWORK \

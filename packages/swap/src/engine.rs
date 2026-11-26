@@ -6,6 +6,17 @@ use belugaswap_math::{
 };
 use belugaswap_tick::TickInfo;
 
+/// Why a swap cannot be executed. The pool maps it to its contract error.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SwapError {
+    AmountTooSmall,
+    InvalidFee,
+    /// A fee step broke `0 <= fee <= amount_in`; indicates a bug.
+    FeeInvariant,
+    NoLiquidity,
+    OutputTooSmall,
+}
+
 // ============================================================
 // SWAP STATE
 // ============================================================
@@ -54,7 +65,7 @@ pub fn engine_swap<N, F1, F2, F3>(
     sqrt_price_limit_x64: u128,
     fee_bps: i128,
     creator_fee_bps: i128,
-) -> (i128, i128, i128)
+) -> Result<(i128, i128, i128), SwapError>
 where
     N: Fn(&Env, i32, bool) -> Option<i32>,
     F1: Fn(&Env, i32) -> TickInfo,
@@ -62,12 +73,10 @@ where
     F3: Fn(&Env, i32, u128),
 {
     if amount_specified < MIN_SWAP_AMOUNT {
-        panic!("swap amount too small");
+        return Err(SwapError::AmountTooSmall);
     }
 
-    if amount_specified <= 0 {
-        return (0, 0, 0);
-    }
+
 
     engine_swap_internal(
         env,
@@ -111,7 +120,7 @@ where
     // Clone state for simulation (doesn't modify original)
     let mut sim_state = state.clone();
 
-    let (amount_in_used, amount_out, _creator_fee) = engine_swap_internal(
+    let (amount_in_used, amount_out, _creator_fee) = match engine_swap_internal(
         env,
         &mut sim_state,
         next_tick_in,
@@ -125,7 +134,10 @@ where
         0,     // No creator fee for quotes
         false, // don't panic
         true,  // dry_run
-    );
+    ) {
+        Ok(result) => result,
+        Err(_) => return (0, 0, state.sqrt_price_x64),
+    };
 
     (amount_in_used, amount_out, sim_state.sqrt_price_x64)
 }
@@ -257,9 +269,10 @@ fn engine_swap_internal<N, F1, F2, F3>(
     sqrt_price_limit_x64: u128,
     fee_bps: i128,
     creator_fee_bps: i128,
+    // false for quotes: stop quietly instead of returning an error
     allow_panic: bool,
     dry_run: bool,
-) -> (i128, i128, i128)
+) -> Result<(i128, i128, i128), SwapError>
 where
     N: Fn(&Env, i32, bool) -> Option<i32>,
     F1: Fn(&Env, i32) -> TickInfo,
@@ -327,10 +340,9 @@ where
         let fee_divisor = 10000 - fee_bps;
         if fee_divisor <= 0 {
             if allow_panic {
-                panic!("fee too high");
-            } else {
-                break;
+                return Err(SwapError::InvalidFee);
             }
+            break;
         }
 
         // Amount available after fee reservation
@@ -376,10 +388,9 @@ where
         // Validate fee
         if step_fee < 0 || (amount_in > 0 && step_fee > amount_in) {
             if allow_panic {
-                panic!("invalid fee calculation");
-            } else {
-                break;
+                return Err(SwapError::FeeInvariant);
             }
+            break;
         }
 
         // Calculate creator fee (percentage of LP fee)
@@ -457,14 +468,14 @@ where
 
     // Validate output
     if amount_out_total < MIN_OUTPUT_AMOUNT {
-        if allow_panic {
-            if state.liquidity <= 0 {
-                panic!("no liquidity available");
-            }
-            panic!("output amount too small");
-        } else {
-            return (0, 0, 0);
+        if !allow_panic {
+            return Ok((0, 0, 0));
         }
+        return Err(if state.liquidity <= 0 {
+            SwapError::NoLiquidity
+        } else {
+            SwapError::OutputTooSmall
+        });
     }
 
     // Update state
@@ -476,7 +487,7 @@ where
     emit_sync(env, state.current_tick, state.sqrt_price_x64);
 
     let amount_in_total = amount_specified.saturating_sub(amount_remaining);
-    (amount_in_total, amount_out_total, total_creator_fee)
+    Ok((amount_in_total, amount_out_total, total_creator_fee))
 }
 
 // ============================================================

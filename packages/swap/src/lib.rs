@@ -9,8 +9,8 @@ pub use types::{SwapResult, PreviewResult};
 // Re-export engine functions and types
 pub use engine::{
     SwapState, 
-    engine_swap, 
+    engine_swap,
+    SwapError,
     quote_swap, 
     validate_and_preview_swap,
-    // Note: engine_swap_safe is intentionally not exported (internal use only)
 };

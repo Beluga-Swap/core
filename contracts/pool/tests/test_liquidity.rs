@@ -7,7 +7,7 @@ use soroban_sdk::{testutils::Address as _, Address, Env};
 // ============================================================
 
 #[test]
-#[should_panic(expected = "invalid tick range")]
+#[should_panic(expected = "Error(Contract, #203)")]
 fn test_add_liquidity_invalid_tick_range_equal() {
     let env = Env::default();
     env.mock_all_auths();
@@ -28,7 +28,7 @@ fn test_add_liquidity_invalid_tick_range_equal() {
 }
 
 #[test]
-#[should_panic(expected = "invalid tick range")]
+#[should_panic(expected = "Error(Contract, #203)")]
 fn test_add_liquidity_invalid_tick_range_inverted() {
     let env = Env::default();
     env.mock_all_auths();
@@ -49,7 +49,7 @@ fn test_add_liquidity_invalid_tick_range_inverted() {
 }
 
 #[test]
-#[should_panic(expected = "liquidity amount too low")]
+#[should_panic(expected = "Error(Contract, #400)")]
 fn test_add_liquidity_zero_amounts() {
     let env = Env::default();
     env.mock_all_auths();
@@ -70,7 +70,7 @@ fn test_add_liquidity_zero_amounts() {
 }
 
 #[test]
-#[should_panic(expected = "liquidity amount too low")]
+#[should_panic(expected = "Error(Contract, #400)")]
 fn test_add_liquidity_below_minimum() {
     let env = Env::default();
     env.mock_all_auths();
@@ -95,7 +95,7 @@ fn test_add_liquidity_below_minimum() {
 // ============================================================
 
 #[test]
-#[should_panic(expected = "insufficient liquidity")]
+#[should_panic(expected = "Error(Contract, #401)")]
 fn test_remove_liquidity_nonexistent_position() {
     let env = Env::default();
     env.mock_all_auths();
@@ -116,7 +116,7 @@ fn test_remove_liquidity_nonexistent_position() {
 }
 
 #[test]
-#[should_panic(expected = "liquidity amount must be positive")]
+#[should_panic(expected = "Error(Contract, #402)")]
 fn test_remove_liquidity_zero_amount() {
     let env = Env::default();
     env.mock_all_auths();

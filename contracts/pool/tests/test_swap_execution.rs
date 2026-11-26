@@ -3,7 +3,7 @@ mod common;
 use soroban_sdk::{testutils::Address as _, Address, Env};
 
 #[test]
-#[should_panic(expected = "invalid token")]
+#[should_panic(expected = "Error(Contract, #300)")]
 fn test_swap_invalid_token() {
     let env = Env::default();
     env.mock_all_auths();
@@ -24,7 +24,7 @@ fn test_swap_invalid_token() {
 }
 
 #[test]
-#[should_panic(expected = "no liquidity available")]
+#[should_panic(expected = "Error(Contract, #503)")]
 fn test_swap_slippage_exceeded() {
     let env = Env::default();
     env.mock_all_auths();

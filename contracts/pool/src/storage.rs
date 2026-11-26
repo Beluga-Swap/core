@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Pool Storage
 
-use soroban_sdk::{contracttype, Address, Env};
+use soroban_sdk::{contracttype, panic_with_error, Address, Env};
+use crate::error::PoolError;
 use belugaswap_tick::TickInfo;
 use belugaswap_position::Position;
 use crate::types::{PoolConfig, PoolState};
@@ -57,7 +58,7 @@ pub fn read_pool_config(env: &Env) -> PoolConfig {
     env.storage()
         .persistent()
         .get(&DataKey::PoolConfig)
-        .unwrap_or_else(|| panic!("pool not initialized"))
+        .unwrap_or_else(|| panic_with_error!(env, PoolError::NotInitialized))
 }
 
 // ============================================================
@@ -73,7 +74,7 @@ pub fn read_pool_state(env: &Env) -> PoolState {
     env.storage()
         .persistent()
         .get(&DataKey::PoolState)
-        .unwrap_or_else(|| panic!("pool not initialized"))
+        .unwrap_or_else(|| panic_with_error!(env, PoolError::NotInitialized))
 }
 
 pub fn init_pool_state(

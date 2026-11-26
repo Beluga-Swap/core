@@ -31,7 +31,7 @@ fn test_initialization_success() {
 }
 
 #[test]
-#[should_panic(expected = "pool already initialized")]
+#[should_panic(expected = "Error(Contract, #100)")]
 fn test_double_initialization() {
     let env = Env::default();
     env.mock_all_auths();
@@ -75,7 +75,7 @@ fn test_double_initialization() {
 }
 
 #[test]
-#[should_panic(expected = "invalid fee")]
+#[should_panic(expected = "Error(Contract, #200)")]
 fn test_invalid_fee_zero() {
     let env = Env::default();
     env.mock_all_auths();
@@ -104,7 +104,7 @@ fn test_invalid_fee_zero() {
 }
 
 #[test]
-#[should_panic(expected = "invalid fee")]
+#[should_panic(expected = "Error(Contract, #200)")]
 fn test_invalid_fee_too_high() {
     let env = Env::default();
     env.mock_all_auths();
@@ -133,7 +133,7 @@ fn test_invalid_fee_too_high() {
 }
 
 #[test]
-#[should_panic(expected = "invalid creator fee")]
+#[should_panic(expected = "Error(Contract, #201)")]
 fn test_invalid_creator_fee_too_low() {
     let env = Env::default();
     env.mock_all_auths();
@@ -162,7 +162,7 @@ fn test_invalid_creator_fee_too_low() {
 }
 
 #[test]
-#[should_panic(expected = "invalid creator fee")]
+#[should_panic(expected = "Error(Contract, #201)")]
 fn test_invalid_creator_fee_too_high() {
     let env = Env::default();
     env.mock_all_auths();
@@ -191,7 +191,7 @@ fn test_invalid_creator_fee_too_high() {
 }
 
 #[test]
-#[should_panic(expected = "invalid tick spacing")]
+#[should_panic(expected = "Error(Contract, #202)")]
 fn test_invalid_tick_spacing_zero() {
     let env = Env::default();
     env.mock_all_auths();
@@ -220,7 +220,7 @@ fn test_invalid_tick_spacing_zero() {
 }
 
 #[test]
-#[should_panic(expected = "invalid tick spacing")]
+#[should_panic(expected = "Error(Contract, #202)")]
 fn test_invalid_tick_spacing_negative() {
     let env = Env::default();
     env.mock_all_auths();

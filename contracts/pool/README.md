@@ -1,6 +1,6 @@
 # BelugaSwap Pool
 
-Concentrated liquidity AMM pool contract with creator fees and factory/router integration.
+Concentrated liquidity AMM pool contract with factory/router integration.
 
 ---
 
@@ -12,7 +12,6 @@ The pool contract handles:
 - Execute token swaps within concentrated liquidity ranges
 - Multi-tick traversal for large swaps
 - Price impact calculation
-- Creator fee distribution
 
 ### 2. **Liquidity Management**
 - Add/remove liquidity in custom price ranges
@@ -21,7 +20,6 @@ The pool contract handles:
 
 ### 3. **Fee Collection**
 - LP fee accumulation per position
-- Creator fee accumulation (if active)
 - Separate collection functions
 
 ### 4. **Factory & Router Integration**
@@ -43,7 +41,6 @@ pub struct PoolConfig {
     pub token_a: Address,      // First token (original order)
     pub token_b: Address,      // Second token (original order)
     pub fee_bps: u32,          // Trading fee (5, 30, or 100)
-    pub creator_fee_bps: u32,  // Creator's share of fees
 }
 ```
 
@@ -72,7 +69,6 @@ stellar contract invoke \
     "token_a": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
     "token_b": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
     "fee_bps": "30",
-    "creator_fee_bps": "100",
     "initial_sqrt_price_x64": "18446744073709551616",
     "amount0_desired": "1000000000",
     "amount1_desired": "1000000000",
@@ -305,15 +301,6 @@ Collect accumulated LP fees from a position.
 
 ---
 
-#### `claim_creator_fees`
-```rust
-pub fn claim_creator_fees(env: Env) -> (u128, u128)
-```
-Claim accumulated creator fees. **Creator only.**
-
-**Returns:** `(fees0, fees1)`
-
----
 
 ### View Functions
 
@@ -333,8 +320,6 @@ pub struct PoolState {
     pub token1: Address,
     pub fee_growth_global_0: u128,
     pub fee_growth_global_1: u128,
-    pub creator_fees_0: u128,
-    pub creator_fees_1: u128,
 }
 ```
 
@@ -379,21 +364,6 @@ pub struct PositionInfo {
 
 ---
 
-#### `get_creator_fees`
-```rust
-pub fn get_creator_fees(env: Env) -> CreatorFeesInfo
-```
-
-**Returns:**
-```rust
-pub struct CreatorFeesInfo {
-    pub fees_token0: u128,
-    pub fees_token1: u128,
-}
-```
-
----
-
 #### `get_swap_direction`
 ```rust
 pub fn get_swap_direction(env: Env, token_in: Address) -> bool
@@ -426,14 +396,6 @@ fn is_position_locked(
 }
 ```
 
-Creator fee is checked during swaps:
-```rust
-// Called internally during swap
-fn get_active_creator_fee_bps_safe(env: &Env, config: &PoolConfig) -> i128 {
-    // Queries factory.is_creator_fee_active()
-    // Returns 0 if revoked or factory call fails
-}
-```
 
 ---
 
@@ -445,7 +407,6 @@ Failures surface as `Error(Contract, #code)`.
 |------|-------|-------------|
 | 101 | `NotInitialized` | Pool state missing |
 | 200 | `InvalidFee` | Fee outside 1-10000 bps |
-| 201 | `InvalidCreatorFee` | Creator fee outside 1-1000 bps |
 | 202 | `InvalidTickSpacing` | Tick spacing must be positive |
 | 203 | `InvalidTickRange` | Lower tick >= upper tick |
 | 204 | `InvalidTick` | Tick or price outside the valid range |
@@ -460,18 +421,6 @@ Failures surface as `Error(Contract, #code)`.
 | 601 | `PositionLocked` | Creator lock still active |
 | 701 | `Overflow` | Liquidity total overflow |
 | 702 | `InvariantViolated` | Internal fee check failed (a bug) |
-
--------|-------------|
-| `pool already initialized` | Cannot reinitialize |
-| `invalid fee` | Fee outside valid range |
-| `invalid creator fee` | Creator fee outside 0.1%-10% |
-| `invalid tick spacing` | Tick spacing must be positive |
-| `invalid tick range` | Lower tick >= upper tick |
-| `invalid token` | Token not in this pool |
-| `slippage exceeded` | Output below minimum |
-| `liquidity too low` | Below minimum liquidity |
-| `insufficient liquidity` | Not enough in position |
-| `position is locked` | Creator lock still active |
 
 ---
 
@@ -555,12 +504,6 @@ stellar contract invoke \
   --lower_tick "-887220" \
   --upper_tick "887220"
 
-# Get creator fees
-stellar contract invoke \
-  --id $POOL \
-  --network $NETWORK \
-  -- get_creator_fees
-
 # Get swap direction
 stellar contract invoke \
   --id $POOL \
@@ -630,13 +573,6 @@ stellar contract invoke \
   --owner "$USER" \
   --lower_tick "-887220" \
   --upper_tick "887220"
-
-# Claim creator fees (creator only)
-stellar contract invoke \
-  --id $POOL \
-  --source $SOURCE \
-  --network $NETWORK \
-  -- claim_creator_fees
 ```
 
 

@@ -57,12 +57,6 @@ impl EventTopic {
     pub fn tick_synced(env: &Env) -> Symbol {
         Symbol::new(env, "TickSynced")
     }
-
-    /// Creator fees claimed event topic
-    #[inline]
-    pub fn creator_fees_claimed(env: &Env) -> Symbol {
-        Symbol::new(env, "CreatorFeesClaimed")
-    }
 }
 
 // ============================================================
@@ -75,7 +69,6 @@ impl EventTopic {
 #[derive(Clone, Debug)]
 pub struct InitializedEventData {
     pub fee_bps: u32,
-    pub creator_fee_bps: u32,
     pub tick_spacing: i32,
 }
 
@@ -133,27 +126,17 @@ pub struct FeesCollectedEventData {
     pub amount1: u128,
 }
 
-/// Data for CreatorFeesClaimed event
-#[contracttype]
-#[derive(Clone, Debug)]
-pub struct CreatorFeesClaimedEventData {
-    pub creator: Address,
-    pub amount0: u128,
-    pub amount1: u128,
-}
-
 // ============================================================
 // EVENT EMITTERS (OpenZeppelin Style)
 // ============================================================
 // Functions to emit events with proper structure
 
 /// Emit pool initialized event
-pub fn emit_initialized(env: &Env, fee_bps: u32, creator_fee_bps: u32, tick_spacing: i32) {
+pub fn emit_initialized(env: &Env, fee_bps: u32, tick_spacing: i32) {
     env.events().publish(
         (EventTopic::initialized(env),),
         InitializedEventData {
             fee_bps,
-            creator_fee_bps,
             tick_spacing,
         },
     );
@@ -208,13 +191,5 @@ pub fn emit_sync_tick(env: &Env, tick: i32, sqrt_price_x64: u128) {
     env.events().publish(
         (EventTopic::tick_synced(env),),
         (tick, sqrt_price_x64),
-    );
-}
-
-/// Emit claim creator fees event (simple version for backward compatibility)
-pub fn emit_claim_creator_fees(env: &Env, amount0: u128, amount1: u128) {
-    env.events().publish(
-        (EventTopic::creator_fees_claimed(env),),
-        (amount0, amount1),
     );
 }

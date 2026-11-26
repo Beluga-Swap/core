@@ -32,7 +32,6 @@ assert_fails "Same token rejected" \
             "token_a": "'"$USDC_ID"'",
             "token_b": "'"$USDC_ID"'",
             "fee_bps": 30,
-            "creator_fee_bps": 100,
             "initial_sqrt_price_x64": "'$((1 << 64))'",
             "amount0_desired": 10000000,
             "amount1_desired": 10000000,
@@ -54,7 +53,6 @@ assert_fails "Invalid fee tier rejected" \
             "token_a": "'"$USDC_ID"'",
             "token_b": "'"$XLM_ID"'",
             "fee_bps": 999,
-            "creator_fee_bps": 100,
             "initial_sqrt_price_x64": "'$((1 << 64))'",
             "amount0_desired": 10000000,
             "amount1_desired": 10000000,
@@ -76,29 +74,6 @@ assert_fails "Duplicate pool rejected" \
             "token_a": "'"$USDC_ID"'",
             "token_b": "'"$XLM_ID"'",
             "fee_bps": 30,
-            "creator_fee_bps": 100,
-            "initial_sqrt_price_x64": "'$((1 << 64))'",
-            "amount0_desired": 10000000,
-            "amount1_desired": 10000000,
-            "lower_tick": -600,
-            "upper_tick": 600,
-            "lock_duration": 0
-        }'
-
-# Test 4: Invalid creator fee rejected
-log_info "Test: Invalid creator fee rejected (too low)"
-assert_fails "Creator fee too low rejected" \
-    soroban contract invoke \
-        --id "$FACTORY_ID" \
-        --network "$NETWORK" \
-        --source admin \
-        -- create_pool \
-        --creator "$ADMIN_ADDRESS" \
-        --params '{
-            "token_a": "'"$USDC_ID"'",
-            "token_b": "'"$XLM_ID"'",
-            "fee_bps": 100,
-            "creator_fee_bps": 5,
             "initial_sqrt_price_x64": "'$((1 << 64))'",
             "amount0_desired": 10000000,
             "amount1_desired": 10000000,

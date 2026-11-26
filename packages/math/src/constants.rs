@@ -54,11 +54,6 @@ pub const MAX_SWAP_ITERATIONS: u32 = 1024;
 /// Maximum fee in basis points (100% = 10000 bps)
 pub const MAX_FEE_BPS: u32 = 10000;
 
-/// Minimum creator fee in basis points (0.01%)
-pub const MIN_CREATOR_FEE_BPS: u32 = 1;
-
-/// Maximum creator fee in basis points (10% of swap = 1000 bps)
-pub const MAX_CREATOR_FEE_BPS: u32 = 1000;
 
 // ============================================================
 // MATH CONSTANTS

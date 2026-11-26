@@ -16,9 +16,6 @@ pub struct MockFactory;
 
 #[contractimpl]
 impl MockFactory {
-    pub fn is_creator_fee_active(_e: Env, _pool: Address, _creator: Address) -> bool {
-        true
-    }
     pub fn is_liquidity_locked(_e: Env, _p: Address, _c: Address, _l: i32, _u: i32) -> bool {
         false
     }
@@ -44,7 +41,7 @@ impl<'a> Pool<'a> {
         let creator = Address::generate(env);
         let a = common::create_token(env, &creator);
         let b = common::create_token(env, &creator);
-        let c = common::deploy_pool(env, &factory, &router, &creator, &a, &b, &fee_bps, &1000, &get_sqrt_ratio_at_tick(tick), &spacing);
+        let c = common::deploy_pool(env, &factory, &router, &creator, &a, &b, &fee_bps, &get_sqrt_ratio_at_tick(tick), &spacing);
         let s = c.get_pool_state();
         Pool { env, c, t0: s.token0, t1: s.token1 }
     }
@@ -355,7 +352,6 @@ fn random_run(seed: u64, profile: Profile) {
         p.c.remove_liquidity(&owner, &lower, &upper, &l, &0, &0);
         p.c.collect_fees(&owner, &lower, &upper);
     }
-    p.c.claim_creator_fees();
     assert_eq!(p.c.get_pool_state().liquidity, 0);
 }
 

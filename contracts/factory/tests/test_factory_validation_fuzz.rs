@@ -37,10 +37,6 @@ fn validate_lock_duration(duration: u32) -> bool {
     duration == 0 || duration >= MIN_LOCK_DURATION
 }
 
-fn validate_creator_fee(fee_bps: u32) -> bool {
-    (10..=1000).contains(&fee_bps)
-}
-
 fn validate_sqrt_price(price: u128) -> bool {
     price > 0
 }
@@ -216,34 +212,6 @@ proptest! {
     }
     
     // ========================================================
-    // CREATOR FEE VALIDATION
-    // ========================================================
-    
-    #[test]
-    fn fuzz_valid_creator_fee(
-        fee_bps in 10u32..=1000u32,
-    ) {
-        let result = validate_creator_fee(fee_bps);
-        prop_assert!(result, "Creator fee 10-1000 bps should be valid");
-    }
-    
-    #[test]
-    fn fuzz_too_low_creator_fee(
-        fee_bps in 0u32..10u32,
-    ) {
-        let result = validate_creator_fee(fee_bps);
-        prop_assert!(!result, "Creator fee < 10 bps should be invalid");
-    }
-    
-    #[test]
-    fn fuzz_too_high_creator_fee(
-        fee_bps in 1001u32..=5000u32,
-    ) {
-        let result = validate_creator_fee(fee_bps);
-        prop_assert!(!result, "Creator fee > 1000 bps should be invalid");
-    }
-    
-    // ========================================================
     // SQRT PRICE VALIDATION
     // ========================================================
     
@@ -272,7 +240,6 @@ proptest! {
         amt0 in MIN_INITIAL_LIQUIDITY..10_000_000i128,
         amt1 in MIN_INITIAL_LIQUIDITY..10_000_000i128,
         fee_tier in prop::sample::select(vec![5u32, 30, 100]),
-        creator_fee in 10u32..=1000u32,
         lock_duration in prop::sample::select(vec![0u32, MIN_LOCK_DURATION, MIN_LOCK_DURATION * 2]),
     ) {
         let spacing = get_tick_spacing(fee_tier);
@@ -287,7 +254,6 @@ proptest! {
         prop_assert!(validate_tick_spacing(upper, spacing));
         prop_assert!(validate_amounts(amt0, amt1));
         prop_assert!(validate_lock_duration(lock_duration));
-        prop_assert!(validate_creator_fee(creator_fee));
         prop_assert!(validate_sqrt_price(1u128 << 64));
     }
     
@@ -295,21 +261,17 @@ proptest! {
     fn fuzz_detect_any_invalid_param(
         valid_amt in MIN_INITIAL_LIQUIDITY..10_000_000i128,
         invalid_amt in 0i128..MIN_INITIAL_LIQUIDITY,
-        valid_creator_fee in 10u32..=1000u32,
-        invalid_creator_fee in 0u32..10u32,
         valid_lock in MIN_LOCK_DURATION..=1000000u32,
         invalid_lock in 1u32..MIN_LOCK_DURATION,
     ) {
         // At least one validation should fail
         let all_valid = 
             validate_amounts(valid_amt, valid_amt) &&
-            validate_creator_fee(valid_creator_fee) &&
             validate_lock_duration(valid_lock);
             
         let has_invalid = 
             !validate_amounts(invalid_amt, valid_amt) ||
             !validate_amounts(valid_amt, invalid_amt) ||
-            !validate_creator_fee(invalid_creator_fee) ||
             !validate_lock_duration(invalid_lock);
         
         prop_assert!(all_valid, "All valid params should pass");
@@ -332,17 +294,6 @@ fn test_boundary_amounts() {
     
     // Zero
     assert!(!validate_amounts(0, 0));
-}
-
-#[test]
-fn test_boundary_creator_fee() {
-    // Lower bound
-    assert!(validate_creator_fee(10));
-    assert!(!validate_creator_fee(9));
-    
-    // Upper bound
-    assert!(validate_creator_fee(1000));
-    assert!(!validate_creator_fee(1001));
 }
 
 #[test]
@@ -432,22 +383,4 @@ fn statistics_fee_tier_distribution() {
     }
     
     assert!(invalid_count >= 195, "Most random fee tiers should be invalid");
-}
-
-#[test]
-fn statistics_creator_fee_range() {
-    let valid_range = 10..=1000;
-    let total_valid = valid_range.count();
-    
-    assert_eq!(total_valid, 991, "Should have 991 valid creator fee values");
-    
-    // Below range
-    for i in 0..10 {
-        assert!(!validate_creator_fee(i));
-    }
-    
-    // Above range
-    for i in 1001..1100 {
-        assert!(!validate_creator_fee(i));
-    }
 }

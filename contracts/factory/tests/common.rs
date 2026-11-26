@@ -20,7 +20,6 @@ pub fn default_pool_params(_env: &Env, token_a: &Address, token_b: &Address) -> 
         token_a: token_a.clone(),
         token_b: token_b.clone(),
         fee_bps: 30,
-        creator_fee_bps: 100,
         initial_sqrt_price_x64: 1u128 << 64,
         amount0_desired: 10_000_000,
         amount1_desired: 10_000_000,

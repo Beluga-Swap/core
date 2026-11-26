@@ -8,6 +8,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 soroban-sdk = { workspace = true }
+belugaswap-swap = { path = "../../packages/swap" }
 
 [dev-dependencies]
 belugaswap-pool = { path = "../pool" }

@@ -12,7 +12,7 @@ use belugaswap_math::{
     constants::{MAX_CREATOR_FEE_BPS, MAX_FEE_BPS, MAX_TICK, MIN_CREATOR_FEE_BPS, MIN_TICK}
 };
 use belugaswap_position::{PositionInfo, modify_position, update_position, calculate_pending_fees};
-use belugaswap_swap::{SwapState, SwapResult, PreviewResult, engine_swap, validate_and_preview_swap};
+use belugaswap_swap::{SwapState, PoolSwapResult, PreviewResult, engine_swap, validate_and_preview_swap};
 
 // Local modules
 mod error;
@@ -227,7 +227,7 @@ impl BelugaPool {
         amount_in: i128,
         amount_out_min: i128,
         sqrt_price_limit_x64: u128,
-    ) -> SwapResult {
+    ) -> PoolSwapResult {
         extend_instance(&env);
         sender.require_auth();
         
@@ -313,7 +313,7 @@ impl BelugaPool {
         
         emit_swap(&env, amount_in_used, amount_out, zero_for_one);
         
-        SwapResult {
+        PoolSwapResult {
             amount_in: amount_in_used,
             amount_out,
             current_tick: swap_state.current_tick,

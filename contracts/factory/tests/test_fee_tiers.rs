@@ -15,7 +15,7 @@ fn test_default_fee_tiers() {
     let tier = tier_5.unwrap();
     assert_eq!(tier.fee_bps, 5);
     assert_eq!(tier.tick_spacing, 10);
-    assert_eq!(tier.enabled, true);
+    assert!(tier.enabled);
     
     // Check 0.30% tier
     let tier_30 = client.get_fee_tier(&30);
@@ -23,7 +23,7 @@ fn test_default_fee_tiers() {
     let tier = tier_30.unwrap();
     assert_eq!(tier.fee_bps, 30);
     assert_eq!(tier.tick_spacing, 60);
-    assert_eq!(tier.enabled, true);
+    assert!(tier.enabled);
     
     // Check 1.00% tier
     let tier_100 = client.get_fee_tier(&100);
@@ -31,7 +31,7 @@ fn test_default_fee_tiers() {
     let tier = tier_100.unwrap();
     assert_eq!(tier.fee_bps, 100);
     assert_eq!(tier.tick_spacing, 200);
-    assert_eq!(tier.enabled, true);
+    assert!(tier.enabled);
 }
 
 #[test]
@@ -49,7 +49,7 @@ fn test_add_custom_fee_tier() {
     let tier = tier.unwrap();
     assert_eq!(tier.fee_bps, 15);
     assert_eq!(tier.tick_spacing, 30);
-    assert_eq!(tier.enabled, true);
+    assert!(tier.enabled);
 }
 
 #[test]
@@ -64,7 +64,7 @@ fn test_disable_fee_tier() {
     
     let tier = client.get_fee_tier(&30);
     assert!(tier.is_some());
-    assert_eq!(tier.unwrap().enabled, false);
+    assert!(!tier.unwrap().enabled);
 }
 
 #[test]

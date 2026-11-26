@@ -200,7 +200,7 @@ impl BelugaFactory {
         }
         
         // Validate creator fee (0.1% - 10%)
-        if creator_fee_bps < 10 || creator_fee_bps > 1000 {
+        if !(10..=1000).contains(&creator_fee_bps) {
             return Err(FactoryError::InvalidCreatorFee);
         }
         

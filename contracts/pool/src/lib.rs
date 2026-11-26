@@ -47,7 +47,7 @@ impl BelugaPool {
     pub fn initialize(
         env: Env,
         factory: Address,
-        router: Address,      // NEW: router parameter
+        router: Address,
         creator: Address,
         token_a: Address,
         token_b: Address,
@@ -68,7 +68,7 @@ impl BelugaPool {
             panic!("{}", ErrorMsg::INVALID_FEE);
         }
         
-        if creator_fee_bps < MIN_CREATOR_FEE_BPS || creator_fee_bps > MAX_CREATOR_FEE_BPS {
+        if !(MIN_CREATOR_FEE_BPS..=MAX_CREATOR_FEE_BPS).contains(&creator_fee_bps) {
             panic!("{}", ErrorMsg::INVALID_CREATOR_FEE);
         }
         
@@ -84,7 +84,7 @@ impl BelugaPool {
         
         let config = PoolConfig {
             factory,
-            router,           // NEW: store router
+            router,
             creator,
             token_a,
             token_b,
@@ -216,7 +216,7 @@ impl BelugaPool {
             &env,
             &swap_state,
             |e, tick, down| find_next_tick(e, tick, pool.tick_spacing, down),
-            |e, t| read_tick_info(e, t),
+            read_tick_info,
             amount_in,
             min_amount_out,
             zero_for_one,
@@ -281,9 +281,9 @@ impl BelugaPool {
             &env,
             &mut swap_state,
             |e, tick, down| find_next_tick(e, tick, pool_state.tick_spacing, down),
-            |e, t| read_tick_info(e, t),
-            |e, t, info| write_tick_info(e, t, info),
-            |e, tick, price| emit_sync_tick(e, tick, price),
+            read_tick_info,
+            write_tick_info,
+            emit_sync_tick,
             amount_in,
             zero_for_one,
             sqrt_price_limit_x64,
@@ -490,8 +490,8 @@ impl BelugaPool {
         // Update ticks
         if belugaswap_tick::update_tick(
                 &env,
-                |e, t| read_tick_info(e, t),
-                |e, t, info| write_tick_info(e, t, info),
+                read_tick_info,
+                write_tick_info,
                 lower_aligned,
                 state.current_tick,
                 -liquidity,
@@ -504,8 +504,8 @@ impl BelugaPool {
         
         if belugaswap_tick::update_tick(
                 &env,
-                |e, t| read_tick_info(e, t),
-                |e, t, info| write_tick_info(e, t, info),
+                read_tick_info,
+                write_tick_info,
                 upper_aligned,
                 state.current_tick,
                 -liquidity,
@@ -679,17 +679,16 @@ impl BelugaPool {
         );
         
         // Slippage check (skip if min = 0, e.g., factory mint)
-        if amount0_min > 0 || amount1_min > 0 {
-            if amount0 < amount0_min || amount1 < amount1_min {
+        if (amount0_min > 0 || amount1_min > 0)
+            && (amount0 < amount0_min || amount1 < amount1_min) {
                 panic!("{}", ErrorMsg::SLIPPAGE_EXCEEDED);
             }
-        }
         
         // Update ticks
         if belugaswap_tick::update_tick(
                 env,
-                |e, t| read_tick_info(e, t),
-                |e, t, info| write_tick_info(e, t, info),
+                read_tick_info,
+                write_tick_info,
                 lower_aligned,
                 state.current_tick,
                 liquidity,
@@ -702,8 +701,8 @@ impl BelugaPool {
         
         if belugaswap_tick::update_tick(
                 env,
-                |e, t| read_tick_info(e, t),
-                |e, t, info| write_tick_info(e, t, info),
+                read_tick_info,
+                write_tick_info,
                 upper_aligned,
                 state.current_tick,
                 liquidity,
@@ -806,7 +805,7 @@ fn get_fee_growth_inside_local(
 ) -> (u128, u128) {
     belugaswap_tick::get_fee_growth_inside(
         env,
-        |e, t| read_tick_info(e, t),
+        read_tick_info,
         lower_tick,
         upper_tick,
         current_tick,

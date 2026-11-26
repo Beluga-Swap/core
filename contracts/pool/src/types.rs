@@ -54,38 +54,9 @@ pub struct PoolState {
 
 #[contracttype]
 #[derive(Clone, Debug)]
+#[derive(Default)]
 pub struct CreatorFeesInfo {
     pub fees_token0: u128,
     pub fees_token1: u128,
 }
 
-impl Default for CreatorFeesInfo {
-    fn default() -> Self {
-        Self {
-            fees_token0: 0,
-            fees_token1: 0,
-        }
-    }
-}
-
-// ============================================================
-// TWAP TYPES (Reserved for future use)
-// ============================================================
-
-#[contracttype]
-#[derive(Clone, Debug)]
-pub struct TWAPObservation {
-    pub timestamp: u64,
-    pub tick_cumulative: i128,
-    pub liquidity_cumulative: u128,
-}
-
-impl Default for TWAPObservation {
-    fn default() -> Self {
-        Self {
-            timestamp: 0,
-            tick_cumulative: 0,
-            liquidity_cumulative: 0,
-        }
-    }
-}

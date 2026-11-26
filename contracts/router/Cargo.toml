@@ -12,11 +12,3 @@ soroban-sdk = { workspace = true }
 [dev-dependencies]
 belugaswap-pool = { path = "../pool" }
 soroban-sdk = { workspace = true, features = ["testutils"] }
-
-[profile.release]
-opt-level = "z"
-overflow-checks = true
-debug = 0
-strip = "symbols"
-codegen-units = 1
-lto = true

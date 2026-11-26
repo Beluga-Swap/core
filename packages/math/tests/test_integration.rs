@@ -15,7 +15,7 @@ fn test_integration_swap_calculation() {
     let amount_in = 10_000i128;
     
     // Calculate swap (zero_for_one = true, swapping token0 for token1)
-    let (next_sqrt_price, consumed_in, received_out) = compute_swap_step(
+    let (next_sqrt_price, consumed_in, received_out) = step_to_limit(
         &env,
         current_sqrt_price,
         liquidity,
@@ -120,7 +120,7 @@ fn test_integration_multi_tick_swap() {
     for _ in 0..5 {
         let amount_in_step = 10_000i128;
         
-        let (next_price, consumed, received) = compute_swap_step(
+        let (next_price, consumed, received) = step_to_limit(
             &env,
             current_price,
             liquidity,
@@ -184,7 +184,7 @@ fn test_integration_swap_with_fees() {
     let fee_bps = 30u32; // 0.3% fee
     
     // Calculate swap
-    let (next_sqrt_price, consumed, received) = compute_swap_step(
+    let (next_sqrt_price, consumed, received) = step_to_limit(
         &env, current_sqrt_price, liquidity, amount_in, true
     );
     
@@ -302,12 +302,12 @@ fn test_integration_no_arbitrage() {
     let amount = 10_000i128;
     
     // Swap token0 for token1
-    let (price_after_1, consumed_1, received_1) = compute_swap_step(
+    let (price_after_1, consumed_1, received_1) = step_to_limit(
         &env, initial_price, liquidity, amount, true
     );
     
     // Swap token1 back for token0
-    let (_final_price, _consumed_2, received_2) = compute_swap_step(
+    let (_final_price, _consumed_2, received_2) = step_to_limit(
         &env, price_after_1, liquidity, received_1, false
     );
     
@@ -320,7 +320,7 @@ fn test_integration_no_arbitrage() {
     };
     
     assert!(
-        loss_pct >= 0 && loss_pct < 15, // Allow up to 15% loss due to precision
+        (0..15).contains(&loss_pct), // Allow up to 15% loss due to precision
         "Round-trip loss should be reasonable: {}%", loss_pct
     );
 }
@@ -360,4 +360,19 @@ fn test_integration_price_at_boundaries() {
     // Should handle extreme prices without panicking
     let _ = get_next_sqrt_price_from_input(&env, min_sqrt_price, liquidity, amount, false);
     let _ = get_next_sqrt_price_from_input(&env, max_sqrt_price, liquidity, amount, true);
+}
+/// The pool's swap step with a target the step cannot reach.
+fn step_to_limit(
+    env: &soroban_sdk::Env,
+    sqrt_price: u128,
+    liquidity: i128,
+    amount: i128,
+    zero_for_one: bool,
+) -> (u128, i128, i128) {
+    let target = if zero_for_one {
+        belugaswap_math::get_sqrt_ratio_at_tick(belugaswap_math::constants::MIN_TICK)
+    } else {
+        belugaswap_math::get_sqrt_ratio_at_tick(belugaswap_math::constants::MAX_TICK)
+    };
+    belugaswap_math::compute_swap_step_with_target(env, sqrt_price, liquidity, amount, zero_for_one, target)
 }

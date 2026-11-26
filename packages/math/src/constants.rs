@@ -20,36 +20,12 @@ pub const MIN_TICK: i32 = -887272;
 pub const MAX_TICK: i32 = 887272;
 
 // ============================================================
-// SQRT PRICE CONSTANTS (Q64.64 format)
-// ============================================================
-
-/// Minimum sqrt price (at MIN_TICK)
-/// Calculated as: sqrt(1.0001^-887272) * 2^64
-#[allow(dead_code)]
-pub const MIN_SQRT_PRICE: u128 = 4295128739;
-
-/// Maximum sqrt price (at MAX_TICK)
-/// Using u128::MAX as safe upper bound
-#[allow(dead_code)]
-pub const MAX_SQRT_PRICE: u128 = u128::MAX;
-
-/// Sqrt price for 1:1 price ratio (2^64)
-/// This represents price = 1.0 in Q64.64 format
-#[allow(dead_code)]
-pub const SQRT_PRICE_1_1: u128 = 18446744073709551616_u128;
-
-// ============================================================
 // LIQUIDITY CONSTANTS
 // ============================================================
 
 /// Minimum liquidity for a position
 /// Prevents dust positions and ensures meaningful LP participation
 pub const MIN_LIQUIDITY: i128 = 1000;
-
-/// Maximum liquidity per tick to prevent overflow
-/// Set to half of i128::MAX for safety margin
-#[allow(dead_code)]
-pub const MAX_LIQUIDITY_PER_TICK: i128 = i128::MAX / 2;
 
 // ============================================================
 // SWAP CONSTANTS
@@ -84,14 +60,6 @@ pub const MIN_CREATOR_FEE_BPS: u32 = 1;
 /// Maximum creator fee in basis points (10% of swap = 1000 bps)
 pub const MAX_CREATOR_FEE_BPS: u32 = 1000;
 
-/// Default LP fee (0.3% = 30 bps)
-#[allow(dead_code)]
-pub const DEFAULT_FEE_BPS: u32 = 30;
-
-/// Default creator fee (1% of LP fee = 100 bps)
-#[allow(dead_code)]
-pub const DEFAULT_CREATOR_FEE_BPS: u32 = 100;
-
 // ============================================================
 // MATH CONSTANTS
 // ============================================================
@@ -100,26 +68,3 @@ pub const DEFAULT_CREATOR_FEE_BPS: u32 = 100;
 /// Used as the scaling factor for Q64.64 format
 pub const Q64: u128 = 1u128 << 64;
 
-/// Q128 multiplier (2^128) for high-precision intermediate calculations
-/// Used when extra precision is needed to prevent precision loss
-#[allow(dead_code)]
-pub const Q128: u128 = 1u128 << 64 << 64;
-
-/// Maximum reasonable fee delta (for overflow detection)
-/// Used to validate fee growth values
-#[allow(dead_code)]
-pub const MAX_REASONABLE_FEE_DELTA: u128 = 1u128 << 96;
-
-// ============================================================
-// TWAP CONSTANTS (Reserved for future use)
-// ============================================================
-
-/// Maximum TWAP observations stored
-/// Limits storage usage for price oracle
-#[allow(dead_code)]
-pub const MAX_TWAP_OBSERVATIONS: u32 = 100;
-
-/// Minimum time between TWAP observations (in seconds)
-/// Prevents observation spam
-#[allow(dead_code)]
-pub const MIN_TWAP_OBSERVATION_INTERVAL: u64 = 1;

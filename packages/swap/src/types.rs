@@ -2,6 +2,7 @@ use soroban_sdk::{contracttype, Symbol};
 
 #[contracttype]
 #[derive(Clone, Debug)]
+#[derive(Default)]
 pub struct SwapResult {
     pub amount_in: i128,
     pub amount_out: i128,
@@ -9,19 +10,10 @@ pub struct SwapResult {
     pub sqrt_price_x64: u128,
 }
 
-impl Default for SwapResult {
-    fn default() -> Self {
-        Self {
-            amount_in: 0,
-            amount_out: 0,
-            current_tick: 0,
-            sqrt_price_x64: 0,
-        }
-    }
-}
 
 #[contracttype]
 #[derive(Clone, Debug)]
+#[derive(Default)]
 pub struct PreviewResult {
     pub amount_in_used: i128,
     pub amount_out_expected: i128,
@@ -31,18 +23,6 @@ pub struct PreviewResult {
     pub error_message: Option<Symbol>,
 }
 
-impl Default for PreviewResult {
-    fn default() -> Self {
-        Self {
-            amount_in_used: 0,
-            amount_out_expected: 0,
-            fee_paid: 0,
-            price_impact_bps: 0,
-            is_valid: false,
-            error_message: None,
-        }
-    }
-}
 
 impl PreviewResult {
     pub fn valid(

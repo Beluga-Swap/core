@@ -27,7 +27,7 @@ fn test_initialization_success() {
     assert_eq!(config.creator_fee_bps, common::DEFAULT_CREATOR_FEE_BPS);
     
     // Token order should be sorted
-    assert!(config.token_a < config.token_b || config.token_a == config.token_b);
+    assert!(config.token_a <= config.token_b);
 }
 
 #[test]

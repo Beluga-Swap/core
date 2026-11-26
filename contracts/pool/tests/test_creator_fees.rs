@@ -1,6 +1,6 @@
 mod common;
 
-use soroban_sdk::{testutils::Address as _, Address, Env};
+use soroban_sdk::Env;
 
 #[test]
 fn test_creator_fee_configuration() {

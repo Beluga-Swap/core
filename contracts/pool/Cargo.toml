@@ -15,11 +15,3 @@ belugaswap-swap = { path = "../../packages/swap" }
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
-
-[profile.release]
-opt-level = "z"
-overflow-checks = true
-debug = 0
-strip = "symbols"
-codegen-units = 1
-lto = true

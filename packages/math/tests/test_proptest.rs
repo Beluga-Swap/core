@@ -37,24 +37,6 @@ proptest! {
         prop_assert_eq!(result1, result2);
     }
 
-    /// Property: div_q64 never panics with non-zero denominator
-    #[test]
-    fn prop_div_q64_no_panic(
-        a in 0u128..u128::MAX/2,
-        b in 1u128..u128::MAX/2
-    ) {
-        let _ = div_q64(a, b);
-        // If we get here, no panic occurred
-    }
-
-    /// Property: div_q64(a, 1) = a * 2^64
-    #[test]
-    fn prop_div_q64_by_one(a in 0u128..(u128::MAX >> 64)) {
-        let result = div_q64(a, 1);
-        let expected = a << 64;
-        prop_assert_eq!(result, expected);
-    }
-
     /// Property: mul_div never panics with non-zero denominator
     #[test]
     fn prop_mul_div_no_panic(
@@ -107,7 +89,7 @@ proptest! {
     /// Property: Tick symmetry - price(tick) * price(-tick) ≈ 1.0
     #[test]
     fn prop_tick_symmetry(tick in 1i32..100000) {
-        if tick > MAX_TICK || tick < MIN_TICK {
+        if !(MIN_TICK..=MAX_TICK).contains(&tick) {
             return Ok(());
         }
         
@@ -115,7 +97,7 @@ proptest! {
         let neg_price = get_sqrt_ratio_at_tick(-tick);
         
         // Product should be close to ONE_X64
-        let product = (pos_price as u128 * neg_price as u128) >> 64;
+        let product = (pos_price * neg_price) >> 64;
         let tolerance = ONE_X64 / 100; // 1% tolerance
         
         prop_assert!(
@@ -277,7 +259,7 @@ proptest! {
     ) {
         let env = Env::default();
         
-        let (next_price, consumed, received) = compute_swap_step(
+        let (next_price, consumed, received) = step_to_limit(
             &env, sqrt_price, liquidity, amount_in, zero_for_one
         );
         
@@ -296,7 +278,7 @@ proptest! {
     ) {
         let env = Env::default();
         
-        let (_next_price, consumed, _received) = compute_swap_step(
+        let (_next_price, consumed, _received) = step_to_limit(
             &env, sqrt_price, liquidity, amount_in, zero_for_one
         );
         
@@ -353,4 +335,19 @@ proptest! {
             "Price must increase with tick: tick1={}, tick2={}, price1={}, price2={}",
             tick1, tick2, price1, price2);
     }
+}
+/// The pool's swap step with a target the step cannot reach.
+fn step_to_limit(
+    env: &soroban_sdk::Env,
+    sqrt_price: u128,
+    liquidity: i128,
+    amount: i128,
+    zero_for_one: bool,
+) -> (u128, i128, i128) {
+    let target = if zero_for_one {
+        belugaswap_math::get_sqrt_ratio_at_tick(belugaswap_math::constants::MIN_TICK)
+    } else {
+        belugaswap_math::get_sqrt_ratio_at_tick(belugaswap_math::constants::MAX_TICK)
+    };
+    belugaswap_math::compute_swap_step_with_target(env, sqrt_price, liquidity, amount, zero_for_one, target)
 }

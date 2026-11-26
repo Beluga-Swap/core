@@ -47,7 +47,7 @@ fn test_get_sqrt_ratio_at_tick_symmetry() {
         let pos = get_sqrt_ratio_at_tick(tick);
         let neg = get_sqrt_ratio_at_tick(-tick);
         
-        let product = (pos as u128 * neg as u128) >> 64;
+        let product = (pos * neg) >> 64;
         
         // Should be close to ONE_X64
         let tolerance = ONE_X64 / 1000; // 0.1% tolerance
@@ -80,20 +80,6 @@ fn test_get_sqrt_ratio_at_tick_too_high() {
     get_sqrt_ratio_at_tick(MAX_TICK + 1);
 }
 
-#[test]
-fn test_tick_to_sqrt_price_x64_alias() {
-    let env = Env::default();
-    
-    // Should be identical to get_sqrt_ratio_at_tick
-    let ticks = vec![0, 100, -100, 1000, -1000];
-    
-    for tick in ticks {
-        let price1 = get_sqrt_ratio_at_tick(tick);
-        let price2 = tick_to_sqrt_price_x64(&env, tick);
-        assert_eq!(price1, price2, "Alias function should return same result");
-    }
-}
-
 // ============================================================
 // MONOTONICITY TESTS
 // ============================================================
@@ -104,7 +90,7 @@ fn test_sqrt_price_monotonically_increasing() {
     
     // Test every 1000 ticks
     for tick in (-100000..=100000).step_by(1000) {
-        if tick < MIN_TICK || tick > MAX_TICK {
+        if !(MIN_TICK..=MAX_TICK).contains(&tick) {
             continue;
         }
         
@@ -219,44 +205,6 @@ fn test_get_next_sqrt_price_from_input_proportional() {
 // ============================================================
 // NEXT SQRT PRICE FROM OUTPUT TESTS
 // ============================================================
-
-#[test]
-fn test_get_next_sqrt_price_from_output_zero_amount() {
-    let env = Env::default();
-    let current_price = ONE_X64;
-    let liquidity = 1_000_000u128;
-    
-    // Zero output should return same price
-    let next_price = get_next_sqrt_price_from_output(&env, current_price, liquidity, 0, true);
-    assert_eq!(next_price, current_price);
-    
-    let next_price = get_next_sqrt_price_from_output(&env, current_price, liquidity, 0, false);
-    assert_eq!(next_price, current_price);
-}
-
-#[test]
-fn test_get_next_sqrt_price_from_output_zero_for_one() {
-    let env = Env::default();
-    let current_price = ONE_X64;
-    let liquidity = 1_000_000u128;
-    let amount_out = 10_000u128;
-    
-    // Zero for one should decrease price
-    let next_price = get_next_sqrt_price_from_output(&env, current_price, liquidity, amount_out, true);
-    assert!(next_price < current_price, "Price should decrease when outputting token1");
-}
-
-#[test]
-fn test_get_next_sqrt_price_from_output_one_for_zero() {
-    let env = Env::default();
-    let current_price = ONE_X64;
-    let liquidity = 1_000_000u128;
-    let amount_out = 10_000u128;
-    
-    // One for zero should increase price
-    let next_price = get_next_sqrt_price_from_output(&env, current_price, liquidity, amount_out, false);
-    assert!(next_price > current_price, "Price should increase when outputting token0");
-}
 
 // ============================================================
 // COMPUTE SWAP STEP WITH TARGET TESTS

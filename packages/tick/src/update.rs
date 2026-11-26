@@ -1,10 +1,6 @@
 // Tick Update and Crossing Logic
 
 use soroban_sdk::Env;
-use belugaswap_math::{
-    constants::{MAX_TICK, MIN_TICK},
-    snap_tick_to_spacing,
-};
 use crate::types::TickInfo;
 
 // ============================================================
@@ -140,50 +136,3 @@ where
     info.liquidity_net
 }
 
-// ============================================================
-// TICK VALIDATION
-// ============================================================
-
-/// Check if a tick is within valid range
-/// 
-/// # Arguments
-/// * `tick` - Tick index to validate
-/// 
-/// # Returns
-/// `true` if tick is within [MIN_TICK, MAX_TICK]
-#[inline]
-pub fn is_valid_tick(tick: i32) -> bool {
-    tick >= MIN_TICK && tick <= MAX_TICK
-}
-
-/// Check if a tick is properly aligned to spacing
-/// 
-/// # Arguments
-/// * `tick` - Tick index to check
-/// * `tick_spacing` - Pool's tick spacing
-/// 
-/// # Returns
-/// `true` if tick is a multiple of tick_spacing
-#[inline]
-pub fn is_aligned_tick(tick: i32, tick_spacing: i32) -> bool {
-    if tick_spacing <= 0 {
-        return false;
-    }
-    tick % tick_spacing == 0
-}
-
-/// Validate and align a tick to spacing
-/// 
-/// # Arguments
-/// * `tick` - Tick index to align
-/// * `tick_spacing` - Pool's tick spacing
-/// 
-/// # Returns
-/// Aligned tick index
-/// 
-/// # Panics
-/// Panics if tick_spacing is not positive
-#[inline]
-pub fn align_tick(tick: i32, tick_spacing: i32) -> i32 {
-    snap_tick_to_spacing(tick, tick_spacing)
-}

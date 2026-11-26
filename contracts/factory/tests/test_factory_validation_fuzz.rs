@@ -38,7 +38,7 @@ fn validate_lock_duration(duration: u32) -> bool {
 }
 
 fn validate_creator_fee(fee_bps: u32) -> bool {
-    fee_bps >= 10 && fee_bps <= 1000
+    (10..=1000).contains(&fee_bps)
 }
 
 fn validate_sqrt_price(price: u128) -> bool {
@@ -425,11 +425,10 @@ fn statistics_fee_tier_distribution() {
     // Verify random values are mostly invalid
     let mut invalid_count = 0;
     for i in 1..=200 {
-        if i != 5 && i != 30 && i != 100 {
-            if !validate_fee_tier(i) {
+        if i != 5 && i != 30 && i != 100
+            && !validate_fee_tier(i) {
                 invalid_count += 1;
             }
-        }
     }
     
     assert!(invalid_count >= 195, "Most random fee tiers should be invalid");

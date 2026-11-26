@@ -5,7 +5,7 @@
 use soroban_sdk::Env;
 use crate::constants::{MIN_TICK, MAX_TICK};
 use crate::q64::mul_q64;
-use crate::q64::{div_q64, mul_div, ONE_X64};
+use crate::q64::ONE_X64;
 use crate::wide::mul_div_wide;
 
 /// Convert tick to sqrt price in Q64.64 format
@@ -58,11 +58,6 @@ pub fn get_sqrt_ratio_at_tick(tick: i32) -> u128 {
     }
 
     ratio
-}
-
-/// Alias for get_sqrt_ratio_at_tick (for backward compatibility)
-pub fn tick_to_sqrt_price_x64(_env: &Env, tick: i32) -> u128 {
-    get_sqrt_ratio_at_tick(tick)
 }
 
 /// Inverse of `get_sqrt_ratio_at_tick`: the largest tick whose sqrt ratio is
@@ -128,32 +123,6 @@ pub fn get_next_sqrt_price_from_input(
         next.min(sqrt_price)
     } else {
         sqrt_price.saturating_add(mul_div_wide(amount_in, 1, 64, liquidity, 1, false))
-    }
-}
-
-/// Calculate next sqrt price given output amount
-pub fn get_next_sqrt_price_from_output(
-    env: &Env,
-    sqrt_price: u128,
-    liquidity: u128,
-    amount_out: u128,
-    zero_for_one: bool,
-) -> u128 {
-    if amount_out == 0 || liquidity == 0 {
-        return sqrt_price;
-    }
-
-    if zero_for_one {
-        let quotient = div_q64(amount_out, liquidity);
-        sqrt_price.saturating_sub(quotient)
-    } else {
-        let product = amount_out.saturating_mul(sqrt_price);
-        let numerator = liquidity.saturating_mul(sqrt_price);
-        let liq_shifted = liquidity << 64;
-        let denominator = liq_shifted.saturating_sub(product);
-
-        if denominator == 0 { return u128::MAX; }
-        mul_div(env, numerator, ONE_X64, denominator)
     }
 }
 

@@ -18,22 +18,3 @@ belugaswap-math = { path = "../../packages/math" }
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
 proptest = "1.0"
-
-[profile.release]
-opt-level = "z"
-overflow-checks = true
-debug = 0
-strip = "symbols"
-debug-assertions = false
-panic = "abort"
-codegen-units = 1
-lto = true
-
-[profile.release-with-logs]
-inherits = "release"
-debug-assertions = true
-
-[profile.test]
-opt-level = 1
-overflow-checks = true
-debug-assertions = true

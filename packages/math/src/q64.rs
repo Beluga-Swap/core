@@ -38,28 +38,6 @@ pub fn mul_q64(a: u128, b: u128) -> u128 {
         .saturating_add(term_ll >> 64)
 }
 
-/// Divide in Q64.64 format: (a * 2^64) / b
-#[inline]
-pub fn div_q64(a: u128, b: u128) -> u128 {
-    if b == 0 { return u128::MAX; }
-
-    if a <= (u128::MAX >> 64) {
-        return (a << 64) / b;
-    }
-
-    let q = a / b;
-    let r = a % b;
-
-    let q_part = q << 64;
-    let r_part = if r <= (u128::MAX >> 64) {
-        (r << 64) / b
-    } else {
-        ((r >> 32) << 32) / (b >> 32).max(1)
-    };
-
-    q_part.saturating_add(r_part)
-}
-
 /// Safe multiply-divide using U256 to prevent overflow
 /// Calculates: (a * b) / denominator
 pub fn mul_div(env: &Env, a: u128, b: u128, denominator: u128) -> u128 {
@@ -75,14 +53,3 @@ pub fn mul_div(env: &Env, a: u128, b: u128, denominator: u128) -> u128 {
     result.to_u128().unwrap_or(u128::MAX)
 }
 
-/// Divide with rounding up - made public
-#[inline]
-pub fn div_round_up(numerator: u128, denominator: u128) -> u128 {
-    if denominator == 0 { return 0; }
-    let result = numerator / denominator;
-    if numerator % denominator != 0 {
-        result.saturating_add(1)
-    } else {
-        result
-    }
-}

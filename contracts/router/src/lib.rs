@@ -21,6 +21,9 @@ use soroban_sdk::{
     contract, contractimpl, vec, Address, Env, IntoVal, Symbol, Vec, token,
 };
 
+// The pool's own result types, so the router can never decode them differently.
+use belugaswap_swap::{PoolSwapResult, PreviewResult};
+
 mod error;
 mod events;
 mod storage;
@@ -542,7 +545,7 @@ Ok(read_config(&env).factory)
         token_in: &Address,
         amount_in: i128,
         sqrt_price_limit: u128,
-    ) -> PreviewResultRaw {
+    ) -> PreviewResult {
         env.invoke_contract(
             pool,
             &Symbol::new(env, "preview_swap"),
@@ -780,30 +783,4 @@ Ok(read_config(&env).factory)
             fee_tiers_used: vec![env, fee_bps],
         })
     }
-}
-
-// ============================================================
-// HELPER TYPES FOR CROSS-CONTRACT CALLS
-// ============================================================
-
-/// Mirror of the pool's `PreviewResult`; field names must match exactly
-#[soroban_sdk::contracttype]
-#[derive(Clone, Debug)]
-struct PreviewResultRaw {
-    pub amount_in_used: i128,
-    pub amount_out_expected: i128,
-    pub fee_paid: i128,
-    pub price_impact_bps: i128,
-    pub is_valid: bool,
-    pub error_message: Option<Symbol>,
-}
-
-/// Raw swap result from pool
-#[soroban_sdk::contracttype]
-#[derive(Clone, Debug)]
-struct PoolSwapResult {
-    pub amount_in: i128,
-    pub amount_out: i128,
-    pub current_tick: i32,
-    pub sqrt_price_x64: u128,
 }

@@ -3,7 +3,7 @@ use soroban_sdk::{contracttype, Symbol};
 #[contracttype]
 #[derive(Clone, Debug)]
 #[derive(Default)]
-pub struct SwapResult {
+pub struct PoolSwapResult {
     pub amount_in: i128,
     pub amount_out: i128,
     pub current_tick: i32,

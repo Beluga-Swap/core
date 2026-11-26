@@ -4,7 +4,7 @@ pub mod types;
 pub mod engine;
 
 // Re-export types
-pub use types::{SwapResult, PreviewResult};
+pub use types::{PoolSwapResult, PreviewResult};
 
 // Re-export engine functions and types
 pub use engine::{

@@ -4,6 +4,7 @@
 
 pub mod constants;
 pub mod q64;
+pub mod wide;
 pub mod sqrt_price;
 pub mod liquidity;
 
@@ -21,6 +22,8 @@ pub use q64::{
     ONE_X64,                // <-- ADDED: constant
 };
 
+pub use wide::mul_div_wide;
+
 // Re-export sqrt price functions
 pub use sqrt_price::{
     get_sqrt_ratio_at_tick,
@@ -37,6 +40,7 @@ pub use liquidity::{
     get_liquidity_for_amount1,
     get_liquidity_for_amounts, 
     get_amounts_for_liquidity,
+    get_amounts_for_liquidity_rounding_up,
     get_amount_0_delta, 
     get_amount_1_delta,
 };

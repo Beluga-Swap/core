@@ -17,6 +17,7 @@
 //! 4. Ready to swap!
 
 use soroban_sdk::{
+    auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation},
     contract, contractimpl, vec, Address, Env, IntoVal, Symbol, Vec, token,
 };
 
@@ -42,9 +43,6 @@ const DEFAULT_FEE_TIERS: [u32; 3] = [5, 30, 100];
 
 /// Minimum output threshold (dust protection)
 const MIN_OUTPUT: i128 = 1;
-
-/// Approval expiry buffer (minimal - just for the current tx)
-const APPROVAL_LEDGER_BUFFER: u32 = 100;
 
 // ============================================================
 // CONTRACT
@@ -211,6 +209,7 @@ impl BelugaRouter {
         
         // Execute each split - all pull from user (same token)
         let mut total_out: i128 = 0;
+        let mut total_used: i128 = 0;
         let mut pools_used = Vec::new(&env);
         let mut fee_tiers_used = Vec::new(&env);
         
@@ -220,6 +219,14 @@ impl BelugaRouter {
             // Skip zero-amount splits
             if split.amount_in <= 0 {
                 continue;
+            }
+
+            // Only pools registered by the factory may be used
+            let config = read_config(&env);
+            let registered =
+                Self::get_pool_address(&env, &config.factory, &token_in, &token_out, split.fee_bps);
+            if registered != Some(split.pool.clone()) {
+                return Err(RouterError::PoolNotFound);
             }
             
             let result = Self::execute_single_swap(
@@ -235,6 +242,7 @@ impl BelugaRouter {
             )?;
             
             total_out = total_out.saturating_add(result.amount_out);
+            total_used = total_used.saturating_add(result.amount_in);
             pools_used.push_back(split.pool.clone());
             fee_tiers_used.push_back(split.fee_bps);
         }
@@ -255,7 +263,7 @@ impl BelugaRouter {
         );
         
         Ok(SwapResult {
-            amount_in,
+            amount_in: total_used,
             amount_out: total_out,
             pools_used,
             fee_tiers_used,
@@ -295,6 +303,7 @@ impl BelugaRouter {
         
         let mut current_token = params.token_in.clone();
         let mut current_amount = params.amount_in;
+        let mut amount_in_used = params.amount_in;
         let mut pools_used = Vec::new(&env);
         let mut fee_tiers_used = Vec::new(&env);
         
@@ -356,6 +365,17 @@ impl BelugaRouter {
                 )?
             };
             
+            if is_first_hop {
+                amount_in_used = result.amount_in;
+            } else if current_amount > result.amount_in {
+                // The pool could not absorb all of it: return the rest.
+                token::Client::new(&env, &current_token).transfer(
+                    &router_addr,
+                    &sender,
+                    &(current_amount - result.amount_in),
+                );
+            }
+
             pools_used.push_back(pool);
             fee_tiers_used.push_back(fee_bps);
             
@@ -374,7 +394,7 @@ impl BelugaRouter {
         );
         
         Ok(SwapResult {
-            amount_in: params.amount_in,
+            amount_in: amount_in_used,
             amount_out: current_amount,
             pools_used,
             fee_tiers_used,
@@ -565,14 +585,14 @@ impl BelugaRouter {
         )
     }
     
-    fn preview_pool_swap(
+    fn preview(
         env: &Env,
         pool: &Address,
         token_in: &Address,
         amount_in: i128,
         sqrt_price_limit: u128,
-    ) -> Option<(i128, i128)> {
-        let result: PreviewResultRaw = env.invoke_contract(
+    ) -> PreviewResultRaw {
+        env.invoke_contract(
             pool,
             &Symbol::new(env, "preview_swap"),
             vec![
@@ -582,10 +602,20 @@ impl BelugaRouter {
                 0i128.into_val(env),
                 sqrt_price_limit.into_val(env),
             ],
-        );
-        
+        )
+    }
+
+    fn preview_pool_swap(
+        env: &Env,
+        pool: &Address,
+        token_in: &Address,
+        amount_in: i128,
+        sqrt_price_limit: u128,
+    ) -> Option<(i128, i128)> {
+        let result = Self::preview(env, pool, token_in, amount_in, sqrt_price_limit);
+
         if result.is_valid {
-            Some((result.amount_out, result.price_impact_bps))
+            Some((result.amount_out_expected, result.price_impact_bps))
         } else {
             None
         }
@@ -685,8 +715,9 @@ impl BelugaRouter {
     ) -> Result<SwapResult, RouterError> {
         let router_addr = env.current_contract_address();
         
-        // Transfer token_in from source (user) to router
-        token::Client::new(env, token_in).transfer(token_source, &router_addr, &amount_in);
+        // Pull only what the pool will consume, so nothing is left behind
+        let used = Self::consumable_amount(env, pool, token_in, amount_in)?;
+        token::Client::new(env, token_in).transfer(token_source, &router_addr, &used);
         
         // Execute the actual swap via pool
         Self::execute_pool_swap(
@@ -724,6 +755,22 @@ impl BelugaRouter {
         )
     }
     
+    /// How much of `amount_in` the pool would consume right now. The pool state
+    /// cannot change between this view and the swap in the same transaction.
+    fn consumable_amount(
+        env: &Env,
+        pool: &Address,
+        token_in: &Address,
+        amount_in: i128,
+    ) -> Result<i128, RouterError> {
+        let preview = Self::preview(env, pool, token_in, amount_in, 0);
+        if preview.is_valid {
+            Ok(preview.amount_in_used)
+        } else {
+            Err(RouterError::QuoteFailed)
+        }
+    }
+
     /// Common pool swap execution logic
     fn execute_pool_swap(
         env: &Env,
@@ -736,15 +783,21 @@ impl BelugaRouter {
         fee_bps: u32,
     ) -> Result<SwapResult, RouterError> {
         let router_addr = env.current_contract_address();
-        let current_ledger = env.ledger().sequence();
-        
-        // Minimal approval - just enough for this transaction
-        token::Client::new(env, token_in).approve(
-            &router_addr,
-            pool,
-            &amount_in,
-            &(current_ledger + APPROVAL_LEDGER_BUFFER),
-        );
+        let used = Self::consumable_amount(env, pool, token_in, amount_in)?;
+
+        // The pool pulls the input with `transfer(router, pool, used)`. That is
+        // a nested call, so the router has to authorize it explicitly.
+        env.authorize_as_current_contract(vec![
+            env,
+            InvokerContractAuthEntry::Contract(SubContractInvocation {
+                context: ContractContext {
+                    contract: token_in.clone(),
+                    fn_name: Symbol::new(env, "transfer"),
+                    args: (router_addr.clone(), pool.clone(), used).into_val(env),
+                },
+                sub_invocations: Vec::new(env),
+            }),
+        ]);
         
         // Call pool swap - router is the sender
         let swap_result: PoolSwapResult = env.invoke_contract(
@@ -782,16 +835,16 @@ impl BelugaRouter {
 // HELPER TYPES FOR CROSS-CONTRACT CALLS
 // ============================================================
 
-/// Raw preview result from pool
+/// Mirror of the pool's `PreviewResult`; field names must match exactly
 #[soroban_sdk::contracttype]
 #[derive(Clone, Debug)]
 struct PreviewResultRaw {
-    pub is_valid: bool,
-    pub amount_in: i128,
-    pub amount_out: i128,
-    pub fee_amount: i128,
+    pub amount_in_used: i128,
+    pub amount_out_expected: i128,
+    pub fee_paid: i128,
     pub price_impact_bps: i128,
-    pub error_code: Symbol,
+    pub is_valid: bool,
+    pub error_message: Option<Symbol>,
 }
 
 /// Raw swap result from pool

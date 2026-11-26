@@ -1,8 +1,8 @@
 use soroban_sdk::{Env, Symbol};
 use belugaswap_math::{
     constants::{MAX_SLIPPAGE_BPS, MAX_SWAP_ITERATIONS, MIN_OUTPUT_AMOUNT, MIN_SWAP_AMOUNT},
-    compute_swap_step_with_target, div_q64, get_sqrt_ratio_at_tick,
-    mul_div,
+    compute_swap_step_with_target, mul_div_wide, get_sqrt_ratio_at_tick, get_tick_at_sqrt_ratio,
+    mul_div, ONE_X64,
 };
 use belugaswap_tick::TickInfo;
 
@@ -42,9 +42,10 @@ pub struct SwapState {
 /// 
 /// # Returns
 /// `(amount_in, amount_out)`
-pub fn engine_swap<F1, F2, F3>(
+pub fn engine_swap<N, F1, F2, F3>(
     env: &Env,
     state: &mut SwapState,
+    next_tick_in: N,
     read_tick: F1,
     write_tick: F2,
     emit_sync: F3,
@@ -55,6 +56,7 @@ pub fn engine_swap<F1, F2, F3>(
     creator_fee_bps: i128,
 ) -> (i128, i128, i128)
 where
+    N: Fn(&Env, i32, bool) -> Option<i32>,
     F1: Fn(&Env, i32) -> TickInfo,
     F2: Fn(&Env, i32, &TickInfo),
     F3: Fn(&Env, i32, u128),
@@ -67,13 +69,10 @@ where
         return (0, 0, 0);
     }
 
-    if state.liquidity <= 0 {
-        panic!("no liquidity available");
-    }
-
     engine_swap_internal(
         env,
         state,
+        next_tick_in,
         read_tick,
         write_tick,
         emit_sync,
@@ -91,9 +90,10 @@ where
 /// 
 /// # Returns
 /// `(amount_in_used, amount_out, final_sqrt_price)`
-pub fn quote_swap<F>(
+pub fn quote_swap<N, F>(
     env: &Env,
     state: &SwapState,
+    next_tick_in: N,
     read_tick: F,
     amount_in: i128,
     zero_for_one: bool,
@@ -101,9 +101,10 @@ pub fn quote_swap<F>(
     fee_bps: i128,
 ) -> (i128, i128, u128)
 where
+    N: Fn(&Env, i32, bool) -> Option<i32>,
     F: Fn(&Env, i32) -> TickInfo,
 {
-    if amount_in < MIN_SWAP_AMOUNT || amount_in <= 0 || state.liquidity <= 0 {
+    if amount_in < MIN_SWAP_AMOUNT || amount_in <= 0 {
         return (0, 0, state.sqrt_price_x64);
     }
 
@@ -113,6 +114,7 @@ where
     let (amount_in_used, amount_out, _creator_fee) = engine_swap_internal(
         env,
         &mut sim_state,
+        next_tick_in,
         read_tick,
         |_, _, _| {}, // no-op write
         |_, _, _| {}, // no-op emit
@@ -141,9 +143,10 @@ where
 /// price_impact = (expected_out - actual_out) / expected_out * 10000
 /// Where expected_out is calculated from spot price before swap
 /// Both values are in output token units (apples to apples)
-pub fn validate_and_preview_swap<F>(
+pub fn validate_and_preview_swap<N, F>(
     env: &Env,
     state: &SwapState,
+    next_tick_in: N,
     read_tick: F,
     amount_in: i128,
     min_amount_out: i128,
@@ -152,6 +155,7 @@ pub fn validate_and_preview_swap<F>(
     fee_bps: i128,
 ) -> Result<(i128, i128, i128, i128, u128), Symbol>
 where
+    N: Fn(&Env, i32, bool) -> Option<i32>,
     F: Fn(&Env, i32) -> TickInfo + Clone,
 {
     // Validate input amount
@@ -159,23 +163,13 @@ where
         return Err(Symbol::new(env, "AMT_LOW"));
     }
 
-    // Validate liquidity
-    if state.liquidity <= 0 {
-        return Err(Symbol::new(env, "NO_LIQ"));
-    }
-
-    // Calculate expected output at spot price (before swap)
-    // This gives us the "ideal" output without any price impact
-    let expected_out = calculate_expected_output(
-        state.sqrt_price_x64,
-        amount_in,
-        zero_for_one,
-        fee_bps,
-    );
-
     // Get actual quote (includes price impact from moving through ticks)
     let (amount_in_used, amount_out, final_price) =
-        quote_swap(env, state, read_tick, amount_in, zero_for_one, sqrt_price_limit_x64, fee_bps);
+        quote_swap(env, state, next_tick_in, read_tick, amount_in, zero_for_one, sqrt_price_limit_x64, fee_bps);
+
+    if amount_out < MIN_OUTPUT_AMOUNT && state.liquidity <= 0 {
+        return Err(Symbol::new(env, "NO_LIQ"));
+    }
 
     // Check slippage against user's minimum
     if amount_out < min_amount_out {
@@ -192,6 +186,10 @@ where
     let fee_paid = amount_in_used
         .saturating_mul(fee_bps)
         .saturating_div(10000);
+
+    // Output at the starting spot price, for the input actually consumed
+    let expected_out =
+        calculate_expected_output(env, state.sqrt_price_x64, amount_in_used, zero_for_one, fee_bps);
 
     // Calculate price impact in basis points
     // price_impact = (expected_out - actual_out) / expected_out * 10000
@@ -212,18 +210,12 @@ where
     Ok((amount_in_used, amount_out, fee_paid, price_impact_bps, final_price))
 }
 
-/// Calculate expected output at current spot price (no price impact)
-/// 
-/// This is used to measure price impact by comparing with actual output.
-/// 
-/// Formula for token0 -> token1 (zero_for_one = true):
-///   price = (sqrt_price_x64 / 2^64)^2
-///   output = input * price * (1 - fee)
-/// 
-/// Formula for token1 -> token0 (zero_for_one = false):
-///   price = (2^64 / sqrt_price_x64)^2  
-///   output = input * price * (1 - fee)
+/// Output of a swap at the current spot price, after the fee.
+///
+/// The Q64.64 price is applied one square root at a time in 256 bits, because
+/// `sqrt_price * sqrt_price` does not fit in u128 once the price reaches 1.
 fn calculate_expected_output(
+    env: &Env,
     sqrt_price_x64: u128,
     amount_in: i128,
     zero_for_one: bool,
@@ -233,45 +225,16 @@ fn calculate_expected_output(
         return 0;
     }
 
-    let amount_in_u = amount_in as u128;
-    const Q64: u128 = 1u128 << 64;
-    
-    // Calculate amount after fee
-    let fee_multiplier = (10000 - fee_bps) as u128;
-    let amount_after_fee = amount_in_u
-        .saturating_mul(fee_multiplier)
-        .saturating_div(10000);
-
-    // Calculate output based on direction
+    let after_fee = mul_div(env, amount_in as u128, (10000 - fee_bps) as u128, 10000);
     let output = if zero_for_one {
-        // token0 -> token1: multiply by price
-        // output = amount * (sqrt_price / Q64)^2
-        // Simplified: output = amount * sqrt_price^2 / Q64^2
-        let price_squared = sqrt_price_x64.saturating_mul(sqrt_price_x64);
-        amount_after_fee
-            .saturating_mul(price_squared)
-            .saturating_div(Q64)
-            .saturating_div(Q64)
+        let half = mul_div(env, after_fee, sqrt_price_x64, ONE_X64);
+        mul_div(env, half, sqrt_price_x64, ONE_X64)
     } else {
-        // token1 -> token0: divide by price
-        // output = amount / (sqrt_price / Q64)^2
-        // Simplified: output = amount * Q64^2 / sqrt_price^2
-        let price_squared = sqrt_price_x64.saturating_mul(sqrt_price_x64);
-        if price_squared == 0 {
-            return 0;
-        }
-        amount_after_fee
-            .saturating_mul(Q64)
-            .saturating_mul(Q64)
-            .saturating_div(price_squared)
+        let half = mul_div(env, after_fee, ONE_X64, sqrt_price_x64);
+        mul_div(env, half, ONE_X64, sqrt_price_x64)
     };
 
-    // Cap at i128::MAX and return
-    if output > i128::MAX as u128 {
-        i128::MAX
-    } else {
-        output as i128
-    }
+    output.min(i128::MAX as u128) as i128
 }
 
 // ============================================================
@@ -282,9 +245,10 @@ fn calculate_expected_output(
 /// 
 /// Creator fee is taken from LP fee (not from total swap amount)
 /// Formula: creator_fee = (lp_fee * creator_fee_bps) / 10000
-fn engine_swap_internal<F1, F2, F3>(
+fn engine_swap_internal<N, F1, F2, F3>(
     env: &Env,
     state: &mut SwapState,
+    next_tick_in: N,
     read_tick: F1,
     write_tick: F2,
     emit_sync: F3,
@@ -297,6 +261,7 @@ fn engine_swap_internal<F1, F2, F3>(
     dry_run: bool,
 ) -> (i128, i128, i128)
 where
+    N: Fn(&Env, i32, bool) -> Option<i32>,
     F1: Fn(&Env, i32) -> TickInfo,
     F2: Fn(&Env, i32, &TickInfo),
     F3: Fn(&Env, i32, u128),
@@ -332,10 +297,6 @@ where
             break;
         }
 
-        if liquidity <= 0 {
-            break;
-        }
-
         // Check price limit
         if zero_for_one && sqrt_price <= sqrt_limit {
             break;
@@ -344,17 +305,14 @@ where
             break;
         }
 
-        // Find next initialized tick
-        let next_tick = belugaswap_tick::find_next_initialized_tick(
-            env,
-            &read_tick,
-            current_tick,
-            state.tick_spacing,
-            zero_for_one,
-        );
-
-        // Get sqrt price at next tick
-        let mut sqrt_target = get_sqrt_ratio_at_tick(next_tick);
+        // Find next initialized tick. With none left in this direction there is
+        // no liquidity to trade against.
+        let next_tick = match next_tick_in(env, current_tick, zero_for_one) {
+            Some(tick) => tick,
+            None => break,
+        };
+        let tick_price = get_sqrt_ratio_at_tick(next_tick);
+        let mut sqrt_target = tick_price;
 
         // Clamp target to user's price limit
         if zero_for_one {
@@ -384,9 +342,10 @@ where
             break;
         }
 
-        // Compute swap step
-        let (sqrt_next, amount_in, amount_out) = if sqrt_price == sqrt_target {
-            (sqrt_price, 0, 0)
+        // Compute swap step. An empty range costs nothing: move straight to the
+        // next boundary.
+        let (sqrt_next, amount_in, amount_out) = if sqrt_price == sqrt_target || liquidity == 0 {
+            (sqrt_target, 0, 0)
         } else {
             compute_swap_step_with_target(
                 env,
@@ -398,8 +357,10 @@ where
             )
         };
 
-        // Check minimum amounts
-        if amount_in < MIN_OUTPUT_AMOUNT || amount_out < MIN_OUTPUT_AMOUNT {
+        // A step that reaches the boundary must still cross it, even when it moves
+        // no tokens. A partial step that yields nothing is dust: stop.
+        let reached_tick = sqrt_next == tick_price;
+        if !reached_tick && (amount_in < MIN_OUTPUT_AMOUNT || amount_out < MIN_OUTPUT_AMOUNT) {
             break;
         }
 
@@ -413,7 +374,7 @@ where
         );
 
         // Validate fee
-        if step_fee < 0 || step_fee > amount_in {
+        if step_fee < 0 || (amount_in > 0 && step_fee > amount_in) {
             if allow_panic {
                 panic!("invalid fee calculation");
             } else {
@@ -444,7 +405,7 @@ where
         if liquidity > 0 && lp_fee > 0 {
             let fee_u = lp_fee as u128;
             let liq_u = liquidity as u128;
-            let growth_delta = div_q64(fee_u, liq_u);
+            let growth_delta = mul_div_wide(fee_u, 1, 64, liq_u, 1, false);
 
             if zero_for_one {
                 state.fee_growth_global_0 = state.fee_growth_global_0.wrapping_add(growth_delta);
@@ -454,16 +415,8 @@ where
         }
 
         // Handle tick crossing
-        let target_reached = sqrt_next == sqrt_target;
-        let should_cross = if zero_for_one {
-            sqrt_target <= sqrt_price
-        } else {
-            sqrt_target >= sqrt_price
-        };
-        let at_user_limit = sqrt_price_limit_x64 != 0 && sqrt_target == sqrt_limit;
-
-        if target_reached && should_cross && !at_user_limit {
-            sqrt_price = sqrt_target;
+        if reached_tick {
+            sqrt_price = sqrt_next;
 
             // Cross tick - only modify storage if NOT dry_run
             let liquidity_net = if dry_run {
@@ -494,11 +447,9 @@ where
                 next_tick
             };
         } else if sqrt_next != sqrt_price {
+            // Stopped inside a range: keep the tick in step with the price.
             sqrt_price = sqrt_next;
-
-            if amount_remaining <= 0 {
-                break;
-            }
+            current_tick = get_tick_at_sqrt_ratio(sqrt_price);
         } else {
             break;
         }
@@ -507,6 +458,9 @@ where
     // Validate output
     if amount_out_total < MIN_OUTPUT_AMOUNT {
         if allow_panic {
+            if state.liquidity <= 0 {
+                panic!("no liquidity available");
+            }
             panic!("output amount too small");
         } else {
             return (0, 0, 0);

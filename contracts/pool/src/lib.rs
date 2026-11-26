@@ -4,7 +4,7 @@ use soroban_sdk::{contract, contractimpl, token, vec, Address, Env, IntoVal, Sym
 
 // External packages
 use belugaswap_math::{
-    get_amounts_for_liquidity, get_liquidity_for_amounts, snap_tick_to_spacing, 
+    get_amounts_for_liquidity, get_amounts_for_liquidity_rounding_up, get_liquidity_for_amounts,snap_tick_to_spacing, 
     MIN_LIQUIDITY, get_sqrt_ratio_at_tick, 
     constants::{MAX_FEE_BPS, MIN_CREATOR_FEE_BPS, MAX_CREATOR_FEE_BPS}
 };
@@ -215,6 +215,7 @@ impl BelugaPool {
         match validate_and_preview_swap(
             &env,
             &swap_state,
+            |e, tick, down| find_next_tick(e, tick, pool.tick_spacing, down),
             |e, t| read_tick_info(e, t),
             amount_in,
             min_amount_out,
@@ -279,6 +280,7 @@ impl BelugaPool {
         let (amount_in_used, amount_out, creator_fee) = engine_swap(
             &env,
             &mut swap_state,
+            |e, tick, down| find_next_tick(e, tick, pool_state.tick_spacing, down),
             |e, t| read_tick_info(e, t),
             |e, t, info| write_tick_info(e, t, info),
             |e, tick, price| emit_sync_tick(e, tick, price),
@@ -407,6 +409,17 @@ impl BelugaPool {
             0,
         );
         
+        // Return whatever the position did not need; nothing else could ever
+        // recover it from the pool.
+        let state = read_pool_state(&env);
+        let pool = env.current_contract_address();
+        if amount0_desired > amount0 {
+            token::Client::new(&env, &state.token0).transfer(&pool, &owner, &(amount0_desired - amount0));
+        }
+        if amount1_desired > amount1 {
+            token::Client::new(&env, &state.token1).transfer(&pool, &owner, &(amount1_desired - amount1));
+        }
+
         emit_add_liquidity(&env, liquidity, amount0, amount1);
         
         liquidity
@@ -475,29 +488,33 @@ impl BelugaPool {
         pos.liquidity = pos.liquidity.saturating_sub(liquidity);
         
         // Update ticks
-        belugaswap_tick::update_tick(
-            &env,
-            |e, t| read_tick_info(e, t),
-            |e, t, info| write_tick_info(e, t, info),
-            lower_aligned,
-            state.current_tick,
-            -liquidity,
-            state.fee_growth_global_0,
-            state.fee_growth_global_1,
-            false,
-        );
+        if belugaswap_tick::update_tick(
+                &env,
+                |e, t| read_tick_info(e, t),
+                |e, t, info| write_tick_info(e, t, info),
+                lower_aligned,
+                state.current_tick,
+                -liquidity,
+                state.fee_growth_global_0,
+                state.fee_growth_global_1,
+                false,
+        ) {
+            flip_tick_bit(&env, lower_aligned, state.tick_spacing);
+        }
         
-        belugaswap_tick::update_tick(
-            &env,
-            |e, t| read_tick_info(e, t),
-            |e, t, info| write_tick_info(e, t, info),
-            upper_aligned,
-            state.current_tick,
-            -liquidity,
-            state.fee_growth_global_0,
-            state.fee_growth_global_1,
-            true,
-        );
+        if belugaswap_tick::update_tick(
+                &env,
+                |e, t| read_tick_info(e, t),
+                |e, t, info| write_tick_info(e, t, info),
+                upper_aligned,
+                state.current_tick,
+                -liquidity,
+                state.fee_growth_global_0,
+                state.fee_growth_global_1,
+                true,
+        ) {
+            flip_tick_bit(&env, upper_aligned, state.tick_spacing);
+        }
         
         // Update pool liquidity if in range
         if state.current_tick >= lower_aligned && state.current_tick < upper_aligned {
@@ -653,7 +670,7 @@ impl BelugaPool {
             panic!("{}", ErrorMsg::LIQUIDITY_TOO_LOW);
         }
         
-        let (amount0, amount1) = get_amounts_for_liquidity(
+        let (amount0, amount1) = get_amounts_for_liquidity_rounding_up(
             env,
             liquidity,
             get_sqrt_ratio_at_tick(lower_aligned),
@@ -669,33 +686,37 @@ impl BelugaPool {
         }
         
         // Update ticks
-        belugaswap_tick::update_tick(
-            env,
-            |e, t| read_tick_info(e, t),
-            |e, t, info| write_tick_info(e, t, info),
-            lower_aligned,
-            state.current_tick,
-            liquidity,
-            state.fee_growth_global_0,
-            state.fee_growth_global_1,
-            false,
-        );
+        if belugaswap_tick::update_tick(
+                env,
+                |e, t| read_tick_info(e, t),
+                |e, t, info| write_tick_info(e, t, info),
+                lower_aligned,
+                state.current_tick,
+                liquidity,
+                state.fee_growth_global_0,
+                state.fee_growth_global_1,
+                false,
+        ) {
+            flip_tick_bit(env, lower_aligned, state.tick_spacing);
+        }
         
-        belugaswap_tick::update_tick(
-            env,
-            |e, t| read_tick_info(e, t),
-            |e, t, info| write_tick_info(e, t, info),
-            upper_aligned,
-            state.current_tick,
-            liquidity,
-            state.fee_growth_global_0,
-            state.fee_growth_global_1,
-            true,
-        );
+        if belugaswap_tick::update_tick(
+                env,
+                |e, t| read_tick_info(e, t),
+                |e, t, info| write_tick_info(e, t, info),
+                upper_aligned,
+                state.current_tick,
+                liquidity,
+                state.fee_growth_global_0,
+                state.fee_growth_global_1,
+                true,
+        ) {
+            flip_tick_bit(env, upper_aligned, state.tick_spacing);
+        }
         
         // Update pool liquidity if in range
         if state.current_tick >= lower_aligned && state.current_tick < upper_aligned {
-            state.liquidity = state.liquidity.saturating_add(liquidity);
+            state.liquidity = state.liquidity.checked_add(liquidity).expect("liquidity overflow");
         }
         write_pool_state(env, &state);
         
@@ -791,6 +812,29 @@ fn get_fee_growth_inside_local(
         current_tick,
         fee_growth_global_0,
         fee_growth_global_1,
+    )
+}
+
+fn find_next_tick(env: &Env, current_tick: i32, tick_spacing: i32, zero_for_one: bool) -> Option<i32> {
+    belugaswap_tick::next_initialized_tick(
+        env,
+        read_bitmap_word,
+        read_bitmap_summary,
+        current_tick,
+        tick_spacing,
+        zero_for_one,
+    )
+}
+
+fn flip_tick_bit(env: &Env, tick: i32, tick_spacing: i32) {
+    belugaswap_tick::flip_tick(
+        env,
+        read_bitmap_word,
+        write_bitmap_word,
+        read_bitmap_summary,
+        write_bitmap_summary,
+        tick,
+        tick_spacing,
     )
 }
 

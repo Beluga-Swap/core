@@ -103,29 +103,36 @@ pub fn read_pool_count(env: &Env) -> u32 {
         .unwrap_or(0)
 }
 
-pub fn increment_pool_count(env: &Env) {
-    let count = read_pool_count(env) + 1;
-    env.storage().persistent().set(&DataKey::PoolCount, &count);
+/// Largest page returned in one call, well within the transaction footprint.
+pub const MAX_POOL_PAGE: u32 = 100;
+
+pub fn read_pool_page(env: &Env, start: u32, limit: u32) -> Vec<Address> {
+    let end = read_pool_count(env).min(start.saturating_add(limit.min(MAX_POOL_PAGE)));
+    let mut page = Vec::new(env);
+    for index in start..end {
+        if let Some(pool) = env.storage().persistent().get(&DataKey::PoolAt(index)) {
+            page.push_back(pool);
+        }
+    }
+    page
 }
 
-pub fn read_pool_list(env: &Env) -> Vec<Address> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::PoolList)
-        .unwrap_or(Vec::new(env))
-}
-
+/// Append a pool to the registry and bump the count.
 pub fn add_to_pool_list(env: &Env, pool: &Address) {
-    let mut list = read_pool_list(env);
-    list.push_back(pool.clone());
-    env.storage().persistent().set(&DataKey::PoolList, &list);
+    let count = read_pool_count(env);
+    let key = DataKey::PoolAt(count);
+    env.storage().persistent().set(&key, pool);
+    extend_ttl(env, &key);
+    write_pool_count(env, count + 1);
+}
+
+fn write_pool_count(env: &Env, count: u32) {
+    env.storage().persistent().set(&DataKey::PoolCount, &count);
+    extend_ttl(env, &DataKey::PoolCount);
 }
 
 pub fn init_pool_list(env: &Env) {
-    env.storage()
-        .persistent()
-        .set(&DataKey::PoolList, &Vec::<Address>::new(env));
-    env.storage().persistent().set(&DataKey::PoolCount, &0u32);
+    write_pool_count(env, 0);
 }
 
 // ============================================================

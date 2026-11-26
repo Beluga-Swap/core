@@ -20,6 +20,8 @@ pub enum DataKey {
     TWAPObservation(u32),
     TWAPNewestIndex,
     TWAPInitialized,
+    TickBitmap(i32),
+    TickBitmapSummary(i32),
 }
 
 // ============================================================
@@ -116,6 +118,35 @@ pub fn read_tick_info(env: &Env, tick: i32) -> TickInfo {
         .persistent()
         .get(&DataKey::Tick(tick))
         .unwrap_or_default()
+}
+
+// ============================================================
+// TICK BITMAP STORAGE
+// ============================================================
+
+fn read_bits(env: &Env, key: DataKey) -> u128 {
+    env.storage().persistent().get(&key).unwrap_or(0)
+}
+
+fn write_bits(env: &Env, key: DataKey, bits: u128) {
+    env.storage().persistent().set(&key, &bits);
+    extend_persistent_ttl(env, &key);
+}
+
+pub fn read_bitmap_word(env: &Env, pos: i32) -> u128 {
+    read_bits(env, DataKey::TickBitmap(pos))
+}
+
+pub fn write_bitmap_word(env: &Env, pos: i32, bits: u128) {
+    write_bits(env, DataKey::TickBitmap(pos), bits)
+}
+
+pub fn read_bitmap_summary(env: &Env, pos: i32) -> u128 {
+    read_bits(env, DataKey::TickBitmapSummary(pos))
+}
+
+pub fn write_bitmap_summary(env: &Env, pos: i32, bits: u128) {
+    write_bits(env, DataKey::TickBitmapSummary(pos), bits)
 }
 
 // ============================================================

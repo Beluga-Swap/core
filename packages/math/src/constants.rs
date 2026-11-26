@@ -71,10 +71,6 @@ pub const MAX_SLIPPAGE_BPS: i128 = 5000;
 /// Safety limit for complex multi-tick swaps
 pub const MAX_SWAP_ITERATIONS: u32 = 1024;
 
-/// Maximum steps when searching for next initialized tick
-/// Limits computation for tick traversal
-pub const MAX_TICK_SEARCH_STEPS: i32 = 2000;
-
 // ============================================================
 // FEE CONSTANTS
 // ============================================================

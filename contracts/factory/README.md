@@ -133,6 +133,13 @@ pub fn is_pool_deployed(
 ```rust
 pub fn get_all_pool_addresses(env: Env) -> Vec<Address>
 ```
+Returns the first 100 pools at most. Page through the registry with `get_pools`.
+
+#### `get_pools`
+```rust
+pub fn get_pools(env: Env, start: u32, limit: u32) -> Vec<Address>
+```
+Up to `limit` pools (at most 100) from creation index `start`.
 
 #### `get_total_pools`
 ```rust

@@ -57,7 +57,7 @@ pub fn modify_position(
 
     // Then adjust liquidity
     if liquidity_delta > 0 {
-        pos.liquidity = pos.liquidity.saturating_add(liquidity_delta);
+        pos.liquidity = pos.liquidity.checked_add(liquidity_delta).expect("position liquidity overflow");
     } else if liquidity_delta < 0 {
         pos.liquidity = pos.liquidity.saturating_sub(liquidity_delta.abs());
     }

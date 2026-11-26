@@ -101,8 +101,9 @@ pub enum DataKey {
     FeeTier(u32),
     /// Pool address by (token0, token1, fee_bps)
     Pool(Address, Address, u32),
-    /// All pool addresses
-    PoolList,
+    /// Pool address by creation index. One entry each, because a single list
+    /// would hit the ledger entry size limit after about 1,600 pools.
+    PoolAt(u32),
     /// Total pool count
     PoolCount,
     /// Creator lock by (pool, creator)

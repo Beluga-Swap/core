@@ -2,8 +2,8 @@
 
 use soroban_sdk::Env;
 use belugaswap_math::{
-    constants::{MAX_TICK, MAX_TICK_SEARCH_STEPS, MIN_TICK}, 
-    snap_tick_to_spacing
+    constants::{MAX_TICK, MIN_TICK},
+    snap_tick_to_spacing,
 };
 use crate::types::TickInfo;
 
@@ -50,7 +50,9 @@ where
 
     let liquidity_gross_before = info.liquidity_gross;
     let liquidity_gross_after = if liquidity_delta > 0 {
-        liquidity_gross_before.saturating_add(liquidity_delta)
+        liquidity_gross_before
+            .checked_add(liquidity_delta)
+            .expect("tick liquidity overflow")
     } else {
         liquidity_gross_before.saturating_sub(liquidity_delta.abs())
     };
@@ -136,69 +138,6 @@ where
     write_tick(env, tick, &info);
 
     info.liquidity_net
-}
-
-// ============================================================
-// TICK TRAVERSAL
-// ============================================================
-
-/// Find the next initialized tick in the given direction
-/// 
-/// This is used during swaps to find the next tick boundary
-/// where liquidity changes.
-/// 
-/// # Arguments
-/// * `env` - Soroban environment
-/// * `read_tick` - Callback to read tick info from storage
-/// * `current_tick` - Starting tick
-/// * `tick_spacing` - Pool's tick spacing
-/// * `zero_for_one` - Direction (true = search left/down, false = search right/up)
-/// 
-/// # Returns
-/// The next initialized tick index, or `current_tick` if none found within search limits
-pub fn find_next_initialized_tick<F>(
-    env: &Env,
-    read_tick: F,
-    current_tick: i32,
-    tick_spacing: i32,
-    zero_for_one: bool,
-) -> i32 
-where
-    F: Fn(&Env, i32) -> TickInfo,
-{
-    if tick_spacing <= 0 {
-        return current_tick;
-    }
-
-    let step = if zero_for_one {
-        -tick_spacing
-    } else {
-        tick_spacing
-    };
-
-    // Start from aligned tick
-    let mut tick = snap_tick_to_spacing(current_tick, tick_spacing);
-
-    // Move to next tick boundary
-    tick = tick.saturating_add(step);
-
-    for _ in 0..MAX_TICK_SEARCH_STEPS {
-        // Check bounds
-        if !(MIN_TICK..=MAX_TICK).contains(&tick) {
-            return current_tick;
-        }
-
-        let info = read_tick(env, tick);
-
-        // Found initialized tick with liquidity
-        if info.initialized && info.liquidity_gross > 0 {
-            return tick;
-        }
-
-        tick = tick.saturating_add(step);
-    }
-
-    current_tick
 }
 
 // ============================================================

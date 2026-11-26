@@ -3,7 +3,7 @@ mod common;
 use soroban_sdk::{testutils::Address as _, Address, Env};
 
 #[test]
-#[should_panic(expected = "tick out of range")]
+#[should_panic(expected = "Error(Contract, #204)")]
 fn test_edge_tick_boundaries() {
     let env = Env::default();
     env.mock_all_auths();

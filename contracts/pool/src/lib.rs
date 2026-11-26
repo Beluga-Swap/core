@@ -1,12 +1,14 @@
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, token, vec, Address, Env, IntoVal, Symbol};
+use soroban_sdk::{
+    contract, contractimpl, panic_with_error, token, vec, Address, Env, IntoVal, Symbol,
+};
 
 // External packages
 use belugaswap_math::{
     get_amounts_for_liquidity, get_amounts_for_liquidity_rounding_up, get_liquidity_for_amounts,snap_tick_to_spacing, 
     MIN_LIQUIDITY, get_sqrt_ratio_at_tick, 
-    constants::{MAX_FEE_BPS, MIN_CREATOR_FEE_BPS, MAX_CREATOR_FEE_BPS}
+    constants::{MAX_CREATOR_FEE_BPS, MAX_FEE_BPS, MAX_TICK, MIN_CREATOR_FEE_BPS, MIN_TICK}
 };
 use belugaswap_position::{PositionInfo, modify_position, update_position, calculate_pending_fees};
 use belugaswap_swap::{SwapState, SwapResult, PreviewResult, engine_swap, validate_and_preview_swap};
@@ -17,7 +19,7 @@ mod events;
 mod storage;
 pub mod types;
 
-use error::ErrorMsg;
+pub use error::PoolError;
 use events::*;
 use storage::*;
 use types::{PoolConfig, PoolState, CreatorFeesInfo};
@@ -61,19 +63,19 @@ impl BelugaPool {
         factory.require_auth();
         
         if is_initialized(&env) {
-            panic!("{}", ErrorMsg::ALREADY_INITIALIZED);
+            panic_with_error!(&env, PoolError::AlreadyInitialized);
         }
         
         if fee_bps == 0 || fee_bps > MAX_FEE_BPS {
-            panic!("{}", ErrorMsg::INVALID_FEE);
+            panic_with_error!(&env, PoolError::InvalidFee);
         }
         
         if !(MIN_CREATOR_FEE_BPS..=MAX_CREATOR_FEE_BPS).contains(&creator_fee_bps) {
-            panic!("{}", ErrorMsg::INVALID_CREATOR_FEE);
+            panic_with_error!(&env, PoolError::InvalidCreatorFee);
         }
         
         if tick_spacing <= 0 {
-            panic!("{}", ErrorMsg::INVALID_TICK_SPACING);
+            panic_with_error!(&env, PoolError::InvalidTickSpacing);
         }
         
         let (token0, token1) = if token_a < token_b {
@@ -179,7 +181,7 @@ impl BelugaPool {
         } else if token_in == pool.token1 {
             false
         } else {
-            panic!("{}", ErrorMsg::INVALID_TOKEN);
+            panic_with_error!(&env, PoolError::InvalidToken);
         }
     }
     
@@ -251,7 +253,7 @@ impl BelugaPool {
         
         // Validate amount_in early
         if amount_in <= 0 {
-            panic!("amount_in must be positive");
+            panic_with_error!(&env, PoolError::SwapAmountTooSmall);
         }
         
         let pool_state = read_pool_state(&env);
@@ -262,7 +264,7 @@ impl BelugaPool {
         } else if token_in == pool_state.token1 {
             false
         } else {
-            panic!("{}", ErrorMsg::INVALID_TOKEN);
+            panic_with_error!(&env, PoolError::InvalidToken);
         };
         
         // Safe creator fee check - won't panic if factory call fails
@@ -277,7 +279,7 @@ impl BelugaPool {
             fee_growth_global_1: pool_state.fee_growth_global_1,
         };
         
-        let (amount_in_used, amount_out, creator_fee) = engine_swap(
+        let swapped = engine_swap(
             &env,
             &mut swap_state,
             |e, tick, down| find_next_tick(e, tick, pool_state.tick_spacing, down),
@@ -290,9 +292,11 @@ impl BelugaPool {
             config.fee_bps as i128,
             creator_fee_bps,
         );
+        let (amount_in_used, amount_out, creator_fee) =
+            swapped.unwrap_or_else(|err| panic_with_error!(&env, PoolError::from(err)));
         
         if amount_out < amount_out_min {
-            panic!("{}", ErrorMsg::SLIPPAGE_EXCEEDED);
+            panic_with_error!(&env, PoolError::SlippageExceeded);
         }
         
         // Update pool state
@@ -438,7 +442,7 @@ impl BelugaPool {
         owner.require_auth();
         
         if liquidity <= 0 {
-            panic!("{}", ErrorMsg::INVALID_LIQUIDITY_AMOUNT);
+            panic_with_error!(&env, PoolError::InvalidLiquidityAmount);
         }
         
         let config = read_pool_config(&env);
@@ -449,13 +453,13 @@ impl BelugaPool {
         
         // Check if position is locked (only affects creator's locked position)
         if Self::is_position_locked(&env, &config, &owner, lower_aligned, upper_aligned) {
-            panic!("position is locked");
+            panic_with_error!(&env, PoolError::PositionLocked);
         }
         
         let mut pos = read_position(&env, &owner, lower_aligned, upper_aligned);
         
         if pos.liquidity < liquidity {
-            panic!("{}", ErrorMsg::INSUFFICIENT_LIQUIDITY);
+            panic_with_error!(&env, PoolError::InsufficientLiquidity);
         }
         
         // Calculate amounts to withdraw
@@ -469,7 +473,7 @@ impl BelugaPool {
         
         // Slippage check
         if amount0 < amount0_min || amount1 < amount1_min {
-            panic!("{}", ErrorMsg::SLIPPAGE_EXCEEDED);
+            panic_with_error!(&env, PoolError::SlippageExceeded);
         }
         
         // Update fee growth
@@ -653,8 +657,11 @@ impl BelugaPool {
         let lower_aligned = snap_tick_to_spacing(lower_tick, state.tick_spacing);
         let upper_aligned = snap_tick_to_spacing(upper_tick, state.tick_spacing);
         
+        if lower_aligned < MIN_TICK || upper_aligned > MAX_TICK {
+            panic_with_error!(env, PoolError::InvalidTick);
+        }
         if lower_aligned >= upper_aligned {
-            panic!("{}", ErrorMsg::INVALID_TICK_RANGE);
+            panic_with_error!(env, PoolError::InvalidTickRange);
         }
         
         let liquidity = get_liquidity_for_amounts(
@@ -667,7 +674,7 @@ impl BelugaPool {
         );
         
         if liquidity < MIN_LIQUIDITY {
-            panic!("{}", ErrorMsg::LIQUIDITY_TOO_LOW);
+            panic_with_error!(env, PoolError::LiquidityTooLow);
         }
         
         let (amount0, amount1) = get_amounts_for_liquidity_rounding_up(
@@ -681,7 +688,7 @@ impl BelugaPool {
         // Slippage check (skip if min = 0, e.g., factory mint)
         if (amount0_min > 0 || amount1_min > 0)
             && (amount0 < amount0_min || amount1 < amount1_min) {
-                panic!("{}", ErrorMsg::SLIPPAGE_EXCEEDED);
+                panic_with_error!(env, PoolError::SlippageExceeded);
             }
         
         // Update ticks
@@ -715,7 +722,10 @@ impl BelugaPool {
         
         // Update pool liquidity if in range
         if state.current_tick >= lower_aligned && state.current_tick < upper_aligned {
-            state.liquidity = state.liquidity.checked_add(liquidity).expect("liquidity overflow");
+            state.liquidity = state
+                .liquidity
+                .checked_add(liquidity)
+                .unwrap_or_else(|| panic_with_error!(env, PoolError::Overflow));
         }
         write_pool_state(env, &state);
         

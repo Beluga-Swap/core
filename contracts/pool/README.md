@@ -152,8 +152,6 @@ stellar contract invoke --id $POOL --network $NETWORK -- get_pool_state
 # Should return configuration with factory, router, tokens, fees
 stellar contract invoke --id $POOL --network $NETWORK -- get_pool_config
 
-# Should return true
-stellar contract invoke --id $POOL --network $NETWORK -- is_initialized
 ```
 
 **If you get `error: a value is required for '--id <CONTRACT_ID>'`:**
@@ -404,11 +402,9 @@ Get swap direction. Returns `true` for token0→token1, `false` for token1→tok
 
 ---
 
-#### `is_initialized`
-```rust
-pub fn is_initialized(env: Env) -> bool
-```
-Check if pool is initialized.
+#### `__constructor`
+Deploy-time setup, called by the factory's `create_pool`. The starting tick is
+derived from the price.
 
 ---
 
@@ -441,10 +437,31 @@ fn get_active_creator_fee_bps_safe(env: &Env, config: &PoolConfig) -> i128 {
 
 ---
 
-## ⚠️ Error Messages
+## ⚠️ Error Codes
 
-| Error | Description |
-|-------|-------------|
+Failures surface as `Error(Contract, #code)`.
+
+| Code | Error | Description |
+|------|-------|-------------|
+| 101 | `NotInitialized` | Pool state missing |
+| 200 | `InvalidFee` | Fee outside 1-10000 bps |
+| 201 | `InvalidCreatorFee` | Creator fee outside 1-1000 bps |
+| 202 | `InvalidTickSpacing` | Tick spacing must be positive |
+| 203 | `InvalidTickRange` | Lower tick >= upper tick |
+| 204 | `InvalidTick` | Tick or price outside the valid range |
+| 300 | `InvalidToken` | Token not in this pool |
+| 400 | `LiquidityTooLow` | Below minimum liquidity |
+| 401 | `InsufficientLiquidity` | Not enough in position |
+| 402 | `InvalidLiquidityAmount` | Liquidity must be positive |
+| 500 | `SwapAmountTooSmall` | Swap amount too small |
+| 501 | `SlippageExceeded` | Output below minimum |
+| 502 | `OutputDust` | Swap would produce no output |
+| 503 | `NoLiquidity` | No liquidity to trade against |
+| 601 | `PositionLocked` | Creator lock still active |
+| 701 | `Overflow` | Liquidity total overflow |
+| 702 | `InvariantViolated` | Internal fee check failed (a bug) |
+
+-------|-------------|
 | `pool already initialized` | Cannot reinitialize |
 | `invalid fee` | Fee outside valid range |
 | `invalid creator fee` | Creator fee outside 0.1%-10% |
@@ -550,12 +567,6 @@ stellar contract invoke \
   --network $NETWORK \
   -- get_swap_direction \
   --token_in "$TOKEN_A"
-
-# Check if initialized
-stellar contract invoke \
-  --id $POOL \
-  --network $NETWORK \
-  -- is_initialized
 
 # Get router address
 stellar contract invoke \

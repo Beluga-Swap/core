@@ -76,23 +76,17 @@ export POOL_WASM_HASH=$(stellar contract upload \
   --wasm target/wasm32v1-none/release/belugaswap_pool.wasm \
   --source $SOURCE --network $NETWORK)
 
-# Deploy Factory
+# Deploy Factory (constructor arguments after --)
 export FACTORY=$(stellar contract deploy \
   --wasm target/wasm32v1-none/release/beluga_factory.wasm \
-  --source $SOURCE --network $NETWORK)
-
-# Initialize Factory
-stellar contract invoke --id $FACTORY --source $SOURCE --network $NETWORK \
-  -- initialize --admin $ADMIN --pool_wasm_hash $POOL_WASM_HASH
+  --source $SOURCE --network $NETWORK \
+  -- --admin $ADMIN --pool_wasm_hash $POOL_WASM_HASH)
 
 # Deploy Router
 export ROUTER=$(stellar contract deploy \
   --wasm target/wasm32v1-none/release/belugaswap_router.wasm \
-  --source $SOURCE --network $NETWORK)
-
-# Initialize Router
-stellar contract invoke --id $ROUTER --source $SOURCE --network $NETWORK \
-  -- initialize --factory $FACTORY --admin $ADMIN
+  --source $SOURCE --network $NETWORK \
+  -- --factory $FACTORY --admin $ADMIN)
 
 # Link Router to Factory
 stellar contract invoke --id $FACTORY --source $SOURCE --network $NETWORK \

@@ -18,7 +18,7 @@
 //! 5. Router registry
 
 use soroban_sdk::{
-    contract, contractimpl, vec, Address, BytesN, Env, IntoVal, Symbol, Vec,
+    contract, contractimpl, vec, Address, BytesN, Env, IntoVal, Symbol, Val, Vec,
     token, xdr::ToXdr,
 };
 
@@ -58,35 +58,18 @@ impl BelugaFactory {
     // INITIALIZATION (Phase 1)
     // ========================================================
     
-    /// Initialize factory with pool rules
-    /// Router is set separately after router deployment
-    pub fn initialize(
-        env: Env,
-        admin: Address,
-        pool_wasm_hash: BytesN<32>,
-    ) -> Result<(), FactoryError> {
-        admin.require_auth();
-        
-        if is_initialized(&env) {
-            return Err(FactoryError::AlreadyInitialized);
-        }
-        
-        // Save config (router = None initially)
-        let config = FactoryConfig {
+/// Deploy-time setup; the factory cannot be initialized by anyone else.
+    pub fn __constructor(env: Env, admin: Address, pool_wasm_hash: BytesN<32>) {
+        write_config(&env, &FactoryConfig {
             admin: admin.clone(),
             pool_wasm_hash,
             router: None,
-        };
-        write_config(&env, &config);
-        set_initialized(&env);
+        });
         init_pool_list(&env);
-        
-        // Init default fee tiers
         Self::init_fee_tiers(&env);
-        
+        extend_instance(&env);
+
         emit_initialized(&env, &admin);
-        
-        Ok(())
     }
     
     // ========================================================
@@ -99,6 +82,7 @@ impl BelugaFactory {
         env: Env,
         router: Address,
     ) -> Result<(), FactoryError> {
+        extend_instance(&env);
         let mut config = read_config(&env);
         config.admin.require_auth();
         
@@ -131,6 +115,7 @@ impl BelugaFactory {
         creator: Address,
         params: CreatePoolParams,
     ) -> Result<Address, FactoryError> {
+        extend_instance(&env);
         creator.require_auth();
         
         // Unpack params
@@ -144,10 +129,6 @@ impl BelugaFactory {
         let lower_tick = params.lower_tick;
         let upper_tick = params.upper_tick;
         let lock_duration = params.lock_duration;
-        
-        if !is_initialized(&env) {
-            return Err(FactoryError::NotInitialized);
-        }
         
         let config = read_config(&env);
         
@@ -209,30 +190,26 @@ impl BelugaFactory {
             return Err(FactoryError::InvalidInitialPrice);
         }
         
-        // === DEPLOY POOL ===
-        let pool_address = Self::deploy_pool(&env, &config, &token0, &token1, fee_bps);
-        
-        // === INITIALIZE POOL ===
-        let factory_address = env.current_contract_address();
-        let router_address = config.router.unwrap(); // Safe: checked above
-        let current_tick = belugaswap_math::get_tick_at_sqrt_ratio(initial_sqrt_price_x64);
-        
-        let _: () = env.invoke_contract(
-            &pool_address,
-            &Symbol::new(&env, "initialize"),
-            vec![
-                &env,
-                factory_address.into_val(&env),
-                router_address.into_val(&env),  // Pass router to pool
-                creator.clone().into_val(&env),
-                token_a.clone().into_val(&env),
-                token_b.clone().into_val(&env),
-                fee_bps.into_val(&env),
-                creator_fee_bps.into_val(&env),
-                initial_sqrt_price_x64.into_val(&env),
-                current_tick.into_val(&env),
-                tick_spacing.into_val(&env),
-            ],
+        // === DEPLOY + INITIALIZE POOL (one step) ===
+        let router_address = config.router.clone().unwrap(); // Safe: checked above
+        let pool_address = Self::deploy_pool(
+            &env,
+            &config,
+            &token0,
+            &token1,
+            fee_bps,
+            (
+                env.current_contract_address(),
+                router_address,
+                creator.clone(),
+                token_a.clone(),
+                token_b.clone(),
+                fee_bps,
+                creator_fee_bps,
+                initial_sqrt_price_x64,
+                tick_spacing,
+            )
+                .into_val(&env),
         );
         
         // === TRANSFER TOKENS ===
@@ -296,6 +273,7 @@ impl BelugaFactory {
         pool_address: Address,
         creator: Address,
     ) -> Result<i128, FactoryError> {
+        extend_instance(&env);
         creator.require_auth();
         
         let mut lock = read_creator_lock(&env, &pool_address, &creator)
@@ -427,9 +405,6 @@ impl BelugaFactory {
     
     /// Check if factory is ready (initialized + router set)
     pub fn is_ready(env: Env) -> bool {
-        if !is_initialized(&env) {
-            return false;
-        }
         read_config(&env).router.is_some()
     }
     
@@ -442,6 +417,7 @@ impl BelugaFactory {
         env: Env, 
         new_hash: BytesN<32>
     ) -> Result<(), FactoryError> {
+        extend_instance(&env);
         let mut config = read_config(&env);
         config.admin.require_auth();
         config.pool_wasm_hash = new_hash;
@@ -451,6 +427,7 @@ impl BelugaFactory {
     
     /// Transfer admin role to new address
     pub fn set_admin(env: Env, new_admin: Address) -> Result<(), FactoryError> {
+        extend_instance(&env);
         let mut config = read_config(&env);
         config.admin.require_auth();
         new_admin.require_auth();
@@ -469,6 +446,7 @@ impl BelugaFactory {
         tick_spacing: i32,
         enabled: bool,
     ) -> Result<(), FactoryError> {
+        extend_instance(&env);
         let config = read_config(&env);
         config.admin.require_auth();
         
@@ -525,6 +503,7 @@ impl BelugaFactory {
         token0: &Address,
         token1: &Address,
         fee_bps: u32,
+        constructor_args: Vec<Val>,
     ) -> Address {
         // Deterministic salt
         let mut salt_data = token0.clone().to_xdr(env);
@@ -534,7 +513,7 @@ impl BelugaFactory {
         
         env.deployer()
             .with_current_contract(salt)
-            .deploy(config.pool_wasm_hash.clone())
+            .deploy_v2(config.pool_wasm_hash.clone(), constructor_args)
     }
     
 }

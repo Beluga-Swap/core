@@ -59,16 +59,4 @@ assert_success "Fee tier 100 bps configured" \
         --tick_spacing 200 \
         --enabled true
 
-# Test 5: Double initialization should fail
-log_info "Test: Double initialization rejected"
-POOL_WASM_HASH=$(load_state "pool_wasm_hash")
-assert_fails "Double initialization rejected" \
-    soroban contract invoke \
-        --id "$FACTORY_ID" \
-        --network "$NETWORK" \
-        --source admin \
-        -- initialize \
-        --admin "$ADMIN_ADDRESS" \
-        --pool_wasm_hash "$POOL_WASM_HASH"
-
 log_success "Scenario 01 completed"

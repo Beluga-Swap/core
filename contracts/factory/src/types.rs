@@ -95,8 +95,6 @@ pub struct CreatorLock {
 pub enum DataKey {
     /// Factory config
     Config,
-    /// Initialization flag
-    Initialized,
     /// Fee tier by fee_bps
     FeeTier(u32),
     /// Pool address by (token0, token1, fee_bps)

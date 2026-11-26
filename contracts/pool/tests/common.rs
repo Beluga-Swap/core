@@ -16,21 +16,7 @@ pub fn setup_pool(env: &Env) -> (BelugaPoolClient<'_>, Address, Address, Address
     let token_a = create_token(env, &creator);
     let token_b = create_token(env, &creator);
     
-    let pool_id = env.register(BelugaPool, ());
-    let client = BelugaPoolClient::new(env, &pool_id);
-    
-    client.initialize(
-        &factory,
-        &router,
-        &creator,
-        &token_a,
-        &token_b,
-        &DEFAULT_FEE_BPS,
-        &DEFAULT_CREATOR_FEE_BPS,
-        &DEFAULT_SQRT_PRICE_X64,
-        &DEFAULT_TICK,
-        &DEFAULT_TICK_SPACING,
-    );
+    let client = deploy_pool(env, &factory, &router, &creator, &token_a, &token_b, &DEFAULT_FEE_BPS, &DEFAULT_CREATOR_FEE_BPS, &DEFAULT_SQRT_PRICE_X64, &DEFAULT_TICK_SPACING);
     
     (client, creator, factory, router, token_a, token_b)
 }
@@ -41,7 +27,6 @@ pub fn setup_custom_pool(
     fee_bps: u32,
     creator_fee_bps: u32,
     sqrt_price_x64: u128,
-    current_tick: i32,
     tick_spacing: i32,
 ) -> (BelugaPoolClient<'_>, Address, Address, Address, Address, Address) {
     let creator = Address::generate(env);
@@ -50,21 +35,7 @@ pub fn setup_custom_pool(
     let token_a = create_token(env, &creator);
     let token_b = create_token(env, &creator);
     
-    let pool_id = env.register(BelugaPool, ());
-    let client = BelugaPoolClient::new(env, &pool_id);
-    
-    client.initialize(
-        &factory,
-        &router,
-        &creator,
-        &token_a,
-        &token_b,
-        &fee_bps,
-        &creator_fee_bps,
-        &sqrt_price_x64,
-        &current_tick,
-        &tick_spacing,
-    );
+    let client = deploy_pool(env, &factory, &router, &creator, &token_a, &token_b, &fee_bps, &creator_fee_bps, &sqrt_price_x64, &tick_spacing);
     
     (client, creator, factory, router, token_a, token_b)
 }
@@ -80,4 +51,36 @@ pub fn mint_tokens(env: &Env, token: &Address, to: &Address, amount: i128) {
     use soroban_sdk::token::StellarAssetClient;
     let client = StellarAssetClient::new(env, token);
     client.mint(to, &amount);
+}
+
+/// Deploy a pool with its constructor arguments. The pool derives its
+/// starting tick from the price.
+#[allow(clippy::too_many_arguments, dead_code)]
+pub fn deploy_pool<'a>(
+    env: &'a Env,
+    factory: &Address,
+    router: &Address,
+    creator: &Address,
+    token_a: &Address,
+    token_b: &Address,
+    fee_bps: &u32,
+    creator_fee_bps: &u32,
+    sqrt_price_x64: &u128,
+    tick_spacing: &i32,
+) -> BelugaPoolClient<'a> {
+    let id = env.register(
+        BelugaPool,
+        (
+            factory,
+            router,
+            creator,
+            token_a,
+            token_b,
+            *fee_bps,
+            *creator_fee_bps,
+            *sqrt_price_x64,
+            *tick_spacing,
+        ),
+    );
+    BelugaPoolClient::new(env, &id)
 }

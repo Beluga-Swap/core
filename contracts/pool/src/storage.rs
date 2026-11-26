@@ -15,7 +15,6 @@ use crate::types::{PoolConfig, PoolState};
 pub enum DataKey {
     PoolState,
     PoolConfig,
-    Initialized,
     Tick(i32),
     Position(Address, i32, i32),
     TickBitmap(i32),
@@ -26,23 +25,17 @@ pub enum DataKey {
 // STORAGE CONFIGURATION
 // ============================================================
 
-pub mod storage_ttl {
-    pub const PERSISTENT_LIFETIME_THRESHOLD: u32 = 6_307_200;
-    pub const PERSISTENT_BUMP_AMOUNT: u32 = 6_307_200;
-}
+const DAY_IN_LEDGERS: u32 = 17_280;
 
-// ============================================================
-// INITIALIZATION STORAGE
-// ============================================================
+/// Entries are extended to `TTL_BUMP` once fewer than `TTL_THRESHOLD` ledgers
+/// remain, so an active entry is re-extended about once a day instead of on
+/// every access.
+const TTL_THRESHOLD: u32 = 30 * DAY_IN_LEDGERS;
+const TTL_BUMP: u32 = 31 * DAY_IN_LEDGERS;
 
-#[inline]
-pub fn is_initialized(env: &Env) -> bool {
-    env.storage().persistent().has(&DataKey::Initialized)
-}
-
-pub fn set_initialized(env: &Env) {
-    env.storage().persistent().set(&DataKey::Initialized, &true);
-    extend_persistent_ttl(env, &DataKey::Initialized);
+/// Keeps the contract instance and its code alive.
+pub fn extend_instance(env: &Env) {
+    env.storage().instance().extend_ttl(TTL_THRESHOLD, TTL_BUMP);
 }
 
 // ============================================================
@@ -171,7 +164,7 @@ pub fn read_position(env: &Env, owner: &Address, lower: i32, upper: i32) -> Posi
 fn extend_persistent_ttl(env: &Env, key: &DataKey) {
     env.storage().persistent().extend_ttl(
         key,
-        storage_ttl::PERSISTENT_LIFETIME_THRESHOLD,
-        storage_ttl::PERSISTENT_BUMP_AMOUNT,
+        TTL_THRESHOLD,
+        TTL_BUMP,
     );
 }

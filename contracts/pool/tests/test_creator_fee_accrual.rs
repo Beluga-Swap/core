@@ -1,6 +1,5 @@
 mod common;
 
-use belugaswap_pool::{BelugaPool, BelugaPoolClient};
 use soroban_sdk::{contract, contractimpl, testutils::Address as _, token::TokenClient, Address, Env};
 
 // Minimal factory stub: creator fee is gated on the factory reporting it active.
@@ -39,15 +38,7 @@ fn test_creator_fee_accrues_and_is_claimable() {
     let token_a = common::create_token(&env, &creator);
     let token_b = common::create_token(&env, &creator);
 
-    let pool_id = env.register(BelugaPool, ());
-    let client = BelugaPoolClient::new(&env, &pool_id);
-    client.initialize(
-        &factory, &router, &creator, &token_a, &token_b,
-        &30,   // fee_bps
-        &1000, // creator_fee_bps (10% of LP fee)
-        &common::DEFAULT_SQRT_PRICE_X64,
-        &0, &60,
-    );
+    let client = common::deploy_pool(&env, &factory, &router, &creator, &token_a, &token_b, &30, &1000, &common::DEFAULT_SQRT_PRICE_X64, &60);
 
     let state = client.get_pool_state();
     let t0 = state.token0.clone();

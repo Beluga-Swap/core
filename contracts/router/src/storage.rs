@@ -8,23 +8,21 @@ use crate::types::{DataKey, RouterConfig};
 // TTL CONFIG
 // ============================================================
 
-const PERSISTENT_TTL: u32 = 6_307_200; // ~1 year
+const DAY_IN_LEDGERS: u32 = 17_280;
+
+/// Entries are extended to `TTL_BUMP` once fewer than `TTL_THRESHOLD` ledgers
+/// remain, so an active entry is re-extended about once a day instead of on
+/// every access.
+const TTL_THRESHOLD: u32 = 30 * DAY_IN_LEDGERS;
+const TTL_BUMP: u32 = 31 * DAY_IN_LEDGERS;
+
+/// Keeps the contract instance and its code alive.
+pub fn extend_instance(env: &Env) {
+    env.storage().instance().extend_ttl(TTL_THRESHOLD, TTL_BUMP);
+}
 
 fn extend_ttl(env: &Env, key: &DataKey) {
-    env.storage().persistent().extend_ttl(key, PERSISTENT_TTL, PERSISTENT_TTL);
-}
-
-// ============================================================
-// INITIALIZATION
-// ============================================================
-
-pub fn is_initialized(env: &Env) -> bool {
-    env.storage().persistent().has(&DataKey::Initialized)
-}
-
-pub fn set_initialized(env: &Env) {
-    env.storage().persistent().set(&DataKey::Initialized, &true);
-    extend_ttl(env, &DataKey::Initialized);
+    env.storage().persistent().extend_ttl(key, TTL_THRESHOLD, TTL_BUMP);
 }
 
 // ============================================================

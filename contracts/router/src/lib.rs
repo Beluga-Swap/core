@@ -12,7 +12,7 @@
 //!
 //! ## Deployment Flow:
 //! 1. Deploy Factory → factory.initialize()
-//! 2. Deploy Router → router.initialize(factory, admin)
+//! 2. Deploy Router → deploy the router with (factory, admin)
 //! 3. Set router in Factory → factory.set_router(router)
 //! 4. Ready to swap!
 
@@ -57,30 +57,16 @@ impl BelugaRouter {
     // INITIALIZATION
     // ========================================================
     
-    /// Initialize router with factory address
-    /// 
-    /// After initialization, call factory.set_router(router_address)
-    pub fn initialize(
-        env: Env,
-        factory: Address,
-        admin: Address,
-    ) -> Result<(), RouterError> {
-        admin.require_auth();
-        
-        if is_initialized(&env) {
-            return Err(RouterError::AlreadyInitialized);
-        }
-        
-        let config = RouterConfig {
-            factory,
+/// Deploy-time setup; afterwards the factory admin calls
+    /// `factory.set_router(router_address)`.
+    pub fn __constructor(env: Env, factory: Address, admin: Address) {
+        write_config(&env, &RouterConfig {
+            factory: factory.clone(),
             admin: admin.clone(),
-        };
-        write_config(&env, &config);
-        set_initialized(&env);
-        
-        emit_initialized(&env, &config.factory, &admin);
-        
-        Ok(())
+        });
+        extend_instance(&env);
+
+        emit_initialized(&env, &factory, &admin);
     }
     
     // ========================================================
@@ -95,11 +81,8 @@ impl BelugaRouter {
         sender: Address,
         params: ExactInputParams,
     ) -> Result<SwapResult, RouterError> {
+        extend_instance(&env);
         sender.require_auth();
-        
-        if !is_initialized(&env) {
-            return Err(RouterError::NotInitialized);
-        }
         
         // Check deadline
         if env.ledger().sequence() > params.deadline {
@@ -173,11 +156,8 @@ impl BelugaRouter {
         recipient: Address,
         deadline: u32,
     ) -> Result<SwapResult, RouterError> {
+        extend_instance(&env);
         sender.require_auth();
-        
-        if !is_initialized(&env) {
-            return Err(RouterError::NotInitialized);
-        }
         
         if env.ledger().sequence() > deadline {
             return Err(RouterError::DeadlineExpired);
@@ -276,11 +256,8 @@ impl BelugaRouter {
         sender: Address,
         params: MultihopExactInputParams,
     ) -> Result<SwapResult, RouterError> {
+        extend_instance(&env);
         sender.require_auth();
-        
-        if !is_initialized(&env) {
-            return Err(RouterError::NotInitialized);
-        }
         
         if env.ledger().sequence() > params.deadline {
             return Err(RouterError::DeadlineExpired);
@@ -413,10 +390,6 @@ impl BelugaRouter {
         amount_in: i128,
         fee_tiers: Vec<u32>,
     ) -> Result<BestQuote, RouterError> {
-        if !is_initialized(&env) {
-            return Err(RouterError::NotInitialized);
-        }
-        
         let config = read_config(&env);
         
         let tiers = if fee_tiers.is_empty() {
@@ -436,10 +409,6 @@ impl BelugaRouter {
         amount_in: i128,
         fee_tiers: Vec<u32>,
     ) -> Result<Vec<PoolQuote>, RouterError> {
-        if !is_initialized(&env) {
-            return Err(RouterError::NotInitialized);
-        }
-        
         let config = read_config(&env);
         
         let tiers = if fee_tiers.is_empty() {
@@ -459,10 +428,6 @@ impl BelugaRouter {
         amount_in: i128,
         fee_tiers: Vec<u32>,
     ) -> Result<AggregatedQuote, RouterError> {
-        if !is_initialized(&env) {
-            return Err(RouterError::NotInitialized);
-        }
-        
         let config = read_config(&env);
         
         let tiers = if fee_tiers.is_empty() {
@@ -497,10 +462,6 @@ impl BelugaRouter {
         amount_in: i128,
         path: Vec<Hop>,
     ) -> Result<i128, RouterError> {
-        if !is_initialized(&env) {
-            return Err(RouterError::NotInitialized);
-        }
-        
         if path.is_empty() {
             return Err(RouterError::InvalidPath);
         }
@@ -539,24 +500,14 @@ impl BelugaRouter {
     
     /// Get router configuration
     pub fn get_config(env: Env) -> Result<RouterConfig, RouterError> {
-        if !is_initialized(&env) {
-            return Err(RouterError::NotInitialized);
-        }
-        Ok(read_config(&env))
+Ok(read_config(&env))
     }
     
     /// Get factory address
     pub fn get_factory(env: Env) -> Result<Address, RouterError> {
-        if !is_initialized(&env) {
-            return Err(RouterError::NotInitialized);
-        }
-        Ok(read_config(&env).factory)
+Ok(read_config(&env).factory)
     }
-    
-    /// Check if router is initialized
-    pub fn is_initialized(env: Env) -> bool {
-        is_initialized(&env)
-    }
+
     
     // ========================================================
     // INTERNAL HELPERS

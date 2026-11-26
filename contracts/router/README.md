@@ -252,11 +252,11 @@ Get factory address.
 
 ---
 
-#### `is_initialized`
+#### `__constructor`
 ```rust
-pub fn is_initialized(env: Env) -> bool
+pub fn __constructor(env: Env, factory: Address, admin: Address)
 ```
-Check if router is initialized.
+Runs once, at deploy time.
 
 ---
 
@@ -264,8 +264,6 @@ Check if router is initialized.
 
 | Code | Error | Description |
 |------|-------|-------------|
-| 1 | `AlreadyInitialized` | Router already initialized |
-| 2 | `NotInitialized` | Router not initialized |
 | 10 | `InvalidPath` | Empty path |
 | 11 | `PathTooLong` | Path exceeds 4 hops |
 | 12 | `NoPoolsFound` | No pools for token pair |
@@ -315,14 +313,11 @@ export NETWORK="testnet"
 export SOURCE="admin"
 export ADMIN=$(stellar keys address $SOURCE)
 
-# Deploy Router
+# Deploy Router (after the Factory; constructor arguments after --)
 export ROUTER=$(stellar contract deploy \
   --wasm target/wasm32v1-none/release/belugaswap_router.wasm \
-  --source $SOURCE --network $NETWORK)
-
-# Initialize (after Factory is deployed)
-stellar contract invoke --id $ROUTER --source $SOURCE --network $NETWORK \
-  -- initialize --factory $FACTORY --admin $ADMIN
+  --source $SOURCE --network $NETWORK \
+  -- --factory $FACTORY --admin $ADMIN)
 
 # Link to Factory
 stellar contract invoke --id $FACTORY --source $SOURCE --network $NETWORK \

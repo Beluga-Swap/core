@@ -24,9 +24,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install Rust
         run: |
-          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --target wasm32v1-none
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component clippy --target wasm32v1-none
           rustup default "$RUST_TOOLCHAIN"
       - uses: Swatinem/rust-cache@v2
+      - name: Clippy (contracts and packages)
+        run: cargo clippy --workspace --lib --locked -- -D warnings
       - name: Build contracts (wasm)
         run: cargo build --workspace --target wasm32v1-none --release --locked
       - name: Test

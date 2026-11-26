@@ -1,4 +1,8 @@
 #![no_std]
+// Entrypoint arguments are the contract's public interface; grouping them into
+// structs would only move the count into client code. The contractimpl macro
+// generates code outside the impl block, so the allow has to be crate-wide.
+#![allow(clippy::too_many_arguments)]
 
 use soroban_sdk::{
     contract, contractimpl, panic_with_error, token, vec, Address, Env, IntoVal, Symbol,
@@ -12,7 +16,10 @@ use belugaswap_math::{
     constants::{MAX_CREATOR_FEE_BPS, MAX_FEE_BPS, MAX_TICK, MIN_CREATOR_FEE_BPS, MIN_TICK}
 };
 use belugaswap_position::{PositionInfo, modify_position, update_position, calculate_pending_fees};
-use belugaswap_swap::{SwapState, PoolSwapResult, PreviewResult, engine_swap, validate_and_preview_swap};
+use belugaswap_swap::{
+    engine_swap, validate_and_preview_swap, PoolSwapResult, PreviewResult, SwapOutcome, SwapParams,
+    SwapState,
+};
 
 // Local modules
 mod error;
@@ -123,14 +130,7 @@ impl BelugaPool {
             state.sqrt_price_x64,
         );
         
-        let fee_growth_inside = get_fee_growth_inside_local(
-            &env,
-            lower_tick,
-            upper_tick,
-            state.current_tick,
-            state.fee_growth_global_0,
-            state.fee_growth_global_1,
-        );
+        let fee_growth_inside = get_fee_growth_inside_local(&env, &state, lower_tick, upper_tick);
         
         let (pending0, pending1) = calculate_pending_fees(&env, &pos, fee_growth_inside.0, fee_growth_inside.1);
         
@@ -193,17 +193,16 @@ impl BelugaPool {
             fee_growth_global_1: pool.fee_growth_global_1,
         };
         
-        match validate_and_preview_swap(
-            &env,
-            &swap_state,
-            |e, tick, down| find_next_tick(e, tick, pool.tick_spacing, down),
-            read_tick_info,
-            amount_in,
-            min_amount_out,
+        let params = SwapParams {
+            amount: amount_in,
             zero_for_one,
             sqrt_price_limit_x64,
-            config.fee_bps as i128,
-        ) {
+            fee_bps: config.fee_bps as i128,
+            creator_fee_bps: 0,
+        };
+        let ticks = PoolTicks { tick_spacing: pool.tick_spacing };
+
+        match validate_and_preview_swap(&env, &swap_state, &ticks, &params, min_amount_out) {
             Ok((amount_in_used, amount_out, fee_paid, price_impact_bps, _final_price)) => {
                 PreviewResult::valid(amount_in_used, amount_out, fee_paid, price_impact_bps)
             }
@@ -259,21 +258,18 @@ impl BelugaPool {
             fee_growth_global_1: pool_state.fee_growth_global_1,
         };
         
-        let swapped = engine_swap(
-            &env,
-            &mut swap_state,
-            |e, tick, down| find_next_tick(e, tick, pool_state.tick_spacing, down),
-            read_tick_info,
-            write_tick_info,
-            emit_sync_tick,
-            amount_in,
+        let params = SwapParams {
+            amount: amount_in,
             zero_for_one,
             sqrt_price_limit_x64,
-            config.fee_bps as i128,
+            fee_bps: config.fee_bps as i128,
             creator_fee_bps,
-        );
-        let (amount_in_used, amount_out, creator_fee) =
-            swapped.unwrap_or_else(|err| panic_with_error!(&env, PoolError::from(err)));
+        };
+        let ticks = PoolTicks { tick_spacing: pool_state.tick_spacing };
+        let SwapOutcome { amount_in: amount_in_used, amount_out, creator_fee } =
+            engine_swap(&env, &mut swap_state, &ticks, &params)
+                .unwrap_or_else(|err| panic_with_error!(&env, PoolError::from(err)));
+        emit_sync_tick(&env, swap_state.current_tick, swap_state.sqrt_price_x64);
         
         if amount_out < amount_out_min {
             panic_with_error!(&env, PoolError::SlippageExceeded);
@@ -345,10 +341,8 @@ impl BelugaPool {
             &owner,
             lower_tick,
             upper_tick,
-            amount0_desired,
-            amount1_desired,
-            amount0_min,
-            amount1_min,
+            (amount0_desired, amount1_desired),
+            (amount0_min, amount1_min),
         );
         
         // Transfer tokens from owner to pool
@@ -389,10 +383,8 @@ impl BelugaPool {
             &owner,
             lower_tick,
             upper_tick,
-            amount0_desired,
-            amount1_desired,
-            0, // No slippage check for factory mint
-            0,
+            (amount0_desired, amount1_desired),
+            (0, 0), // no slippage check for the factory mint
         );
         
         // Return whatever the position did not need; nothing else could ever
@@ -460,14 +452,7 @@ impl BelugaPool {
         }
         
         // Update fee growth
-        let fee_growth_inside = get_fee_growth_inside_local(
-            &env,
-            lower_aligned,
-            upper_aligned,
-            state.current_tick,
-            state.fee_growth_global_0,
-            state.fee_growth_global_1,
-        );
+        let fee_growth_inside = get_fee_growth_inside_local(&env, &state, lower_aligned, upper_aligned);
         
         update_position(&env, &mut pos, fee_growth_inside.0, fee_growth_inside.1);
         
@@ -475,33 +460,15 @@ impl BelugaPool {
         pos.liquidity = pos.liquidity.saturating_sub(liquidity);
         
         // Update ticks
-        if belugaswap_tick::update_tick(
-                &env,
-                read_tick_info,
-                write_tick_info,
-                lower_aligned,
-                state.current_tick,
-                -liquidity,
-                state.fee_growth_global_0,
-                state.fee_growth_global_1,
-                false,
-        ) {
-            flip_tick_bit(&env, lower_aligned, state.tick_spacing);
-        }
-        
-        if belugaswap_tick::update_tick(
-                &env,
-                read_tick_info,
-                write_tick_info,
-                upper_aligned,
-                state.current_tick,
-                -liquidity,
-                state.fee_growth_global_0,
-                state.fee_growth_global_1,
-                true,
-        ) {
-            flip_tick_bit(&env, upper_aligned, state.tick_spacing);
-        }
+        belugaswap_tick::update_range(
+            &env,
+            &PoolTicks { tick_spacing: state.tick_spacing },
+            lower_aligned,
+            upper_aligned,
+            state.current_tick,
+            -liquidity,
+            (state.fee_growth_global_0, state.fee_growth_global_1),
+        );
         
         // Update pool liquidity if in range
         if state.current_tick >= lower_aligned && state.current_tick < upper_aligned {
@@ -542,14 +509,7 @@ impl BelugaPool {
         let mut pos = read_position(&env, &owner, lower_aligned, upper_aligned);
         
         // Update fee growth
-        let fee_growth_inside = get_fee_growth_inside_local(
-            &env,
-            lower_aligned,
-            upper_aligned,
-            state.current_tick,
-            state.fee_growth_global_0,
-            state.fee_growth_global_1,
-        );
+        let fee_growth_inside = get_fee_growth_inside_local(&env, &state, lower_aligned, upper_aligned);
         
         let (pending0, pending1) = calculate_pending_fees(&env, &pos, fee_growth_inside.0, fee_growth_inside.1);
         
@@ -632,10 +592,8 @@ impl BelugaPool {
         owner: &Address,
         lower_tick: i32,
         upper_tick: i32,
-        amount0_desired: i128,
-        amount1_desired: i128,
-        amount0_min: i128,
-        amount1_min: i128,
+        (amount0_desired, amount1_desired): (i128, i128),
+        (amount0_min, amount1_min): (i128, i128),
     ) -> (i128, i128, i128) {
         let mut state = read_pool_state(env);
         
@@ -677,33 +635,15 @@ impl BelugaPool {
             }
         
         // Update ticks
-        if belugaswap_tick::update_tick(
-                env,
-                read_tick_info,
-                write_tick_info,
-                lower_aligned,
-                state.current_tick,
-                liquidity,
-                state.fee_growth_global_0,
-                state.fee_growth_global_1,
-                false,
-        ) {
-            flip_tick_bit(env, lower_aligned, state.tick_spacing);
-        }
-        
-        if belugaswap_tick::update_tick(
-                env,
-                read_tick_info,
-                write_tick_info,
-                upper_aligned,
-                state.current_tick,
-                liquidity,
-                state.fee_growth_global_0,
-                state.fee_growth_global_1,
-                true,
-        ) {
-            flip_tick_bit(env, upper_aligned, state.tick_spacing);
-        }
+        belugaswap_tick::update_range(
+            env,
+            &PoolTicks { tick_spacing: state.tick_spacing },
+            lower_aligned,
+            upper_aligned,
+            state.current_tick,
+            liquidity,
+            (state.fee_growth_global_0, state.fee_growth_global_1),
+        );
         
         // Update pool liquidity if in range
         if state.current_tick >= lower_aligned && state.current_tick < upper_aligned {
@@ -715,14 +655,7 @@ impl BelugaPool {
         write_pool_state(env, &state);
         
         // Update position
-        let fee_growth_inside = get_fee_growth_inside_local(
-            env,
-            lower_aligned,
-            upper_aligned,
-            state.current_tick,
-            state.fee_growth_global_0,
-            state.fee_growth_global_1,
-        );
+        let fee_growth_inside = get_fee_growth_inside_local(env, &state, lower_aligned, upper_aligned);
         
         let mut pos = read_position(env, owner, lower_aligned, upper_aligned);
         modify_position(env, &mut pos, liquidity, fee_growth_inside.0, fee_growth_inside.1);
@@ -792,43 +725,17 @@ impl BelugaPool {
 
 fn get_fee_growth_inside_local(
     env: &Env,
+    state: &PoolState,
     lower_tick: i32,
     upper_tick: i32,
-    current_tick: i32,
-    fee_growth_global_0: u128,
-    fee_growth_global_1: u128,
 ) -> (u128, u128) {
     belugaswap_tick::get_fee_growth_inside(
         env,
-        read_tick_info,
+        &PoolTicks { tick_spacing: state.tick_spacing },
         lower_tick,
         upper_tick,
-        current_tick,
-        fee_growth_global_0,
-        fee_growth_global_1,
-    )
-}
-
-fn find_next_tick(env: &Env, current_tick: i32, tick_spacing: i32, zero_for_one: bool) -> Option<i32> {
-    belugaswap_tick::next_initialized_tick(
-        env,
-        read_bitmap_word,
-        read_bitmap_summary,
-        current_tick,
-        tick_spacing,
-        zero_for_one,
-    )
-}
-
-fn flip_tick_bit(env: &Env, tick: i32, tick_spacing: i32) {
-    belugaswap_tick::flip_tick(
-        env,
-        read_bitmap_word,
-        write_bitmap_word,
-        read_bitmap_summary,
-        write_bitmap_summary,
-        tick,
-        tick_spacing,
+        state.current_tick,
+        (state.fee_growth_global_0, state.fee_growth_global_1),
     )
 }
 

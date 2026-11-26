@@ -1,4 +1,8 @@
 #![no_std]
+// Entrypoint arguments are the contract's public interface; grouping them into
+// structs would only move the count into client code. The contractimpl macro
+// generates code outside the impl block, so the allow has to be crate-wide.
+#![allow(clippy::too_many_arguments)]
 
 //! # BelugaSwap Router
 //! 
@@ -120,16 +124,18 @@ impl BelugaRouter {
         }
         
         // Execute swap - pull from user
-        let result = Self::execute_single_swap(
+        let result = Self::execute_leg(
             &env,
-            &sender,              
-            &params.recipient,   
-            &params.token_in,
-            &params.token_out,
-            params.amount_in,
-            params.amount_out_min,
-            &best_quote.pool,
-            best_quote.fee_bps,
+            Some(&sender),
+            &params.recipient,
+            &Leg {
+                pool: &best_quote.pool,
+                fee_bps: best_quote.fee_bps,
+                token_in: &params.token_in,
+                token_out: &params.token_out,
+                amount_in: params.amount_in,
+                amount_out_min: params.amount_out_min,
+            },
         )?;
         
         emit_swap(
@@ -212,16 +218,18 @@ impl BelugaRouter {
                 return Err(RouterError::PoolNotFound);
             }
             
-            let result = Self::execute_single_swap(
+            let result = Self::execute_leg(
                 &env,
-                &sender,
+                Some(&sender),
                 &recipient,
-                &token_in,
-                &token_out,
-                split.amount_in,
-                MIN_OUTPUT, 
-                &split.pool,
-                split.fee_bps,
+                &Leg {
+                    pool: &split.pool,
+                    fee_bps: split.fee_bps,
+                    token_in: &token_in,
+                    token_out: &token_out,
+                    amount_in: split.amount_in,
+                    amount_out_min: MIN_OUTPUT,
+                },
             )?;
             
             total_out = total_out.saturating_add(result.amount_out);
@@ -321,27 +329,32 @@ impl BelugaRouter {
             let is_first_hop = i == 0;
             
             let result = if is_first_hop {
-                Self::execute_single_swap(
+                Self::execute_leg(
                     &env,
-                    &sender,          
+                    Some(&sender),
                     &hop_recipient,
-                    &current_token,
-                    &next_token,
-                    current_amount,
-                    min_out,
-                    &pool,
-                    fee_bps,
+                    &Leg {
+                        pool: &pool,
+                        fee_bps,
+                        token_in: &current_token,
+                        token_out: &next_token,
+                        amount_in: current_amount,
+                        amount_out_min: min_out,
+                    },
                 )?
             } else {
-                Self::execute_swap_from_router(
+                Self::execute_leg(
                     &env,
+                    None,
                     &hop_recipient,
-                    &current_token,
-                    &next_token,
-                    current_amount,
-                    min_out,
-                    &pool,
-                    fee_bps,
+                    &Leg {
+                        pool: &pool,
+                        fee_bps,
+                        token_in: &current_token,
+                        token_out: &next_token,
+                        amount_in: current_amount,
+                        amount_out_min: min_out,
+                    },
                 )?
             };
             
@@ -655,60 +668,6 @@ Ok(read_config(&env).factory)
         })
     }
     
-    /// Execute swap pulling tokens from an external source (user)
-    fn execute_single_swap(
-        env: &Env,
-        token_source: &Address,
-        recipient: &Address,
-        token_in: &Address,
-        token_out: &Address,
-        amount_in: i128,
-        amount_out_min: i128,
-        pool: &Address,
-        fee_bps: u32,
-    ) -> Result<SwapResult, RouterError> {
-        let router_addr = env.current_contract_address();
-        
-        // Pull only what the pool will consume, so nothing is left behind
-        let used = Self::consumable_amount(env, pool, token_in, amount_in)?;
-        token::Client::new(env, token_in).transfer(token_source, &router_addr, &used);
-        
-        // Execute the actual swap via pool
-        Self::execute_pool_swap(
-            env,
-            recipient,
-            token_in,
-            token_out,
-            amount_in,
-            amount_out_min,
-            pool,
-            fee_bps,
-        )
-    }
-    
-    /// Execute swap using tokens already in router
-    fn execute_swap_from_router(
-        env: &Env,
-        recipient: &Address,
-        token_in: &Address,
-        token_out: &Address,
-        amount_in: i128,
-        amount_out_min: i128,
-        pool: &Address,
-        fee_bps: u32,
-    ) -> Result<SwapResult, RouterError> {
-        Self::execute_pool_swap(
-            env,
-            recipient,
-            token_in,
-            token_out,
-            amount_in,
-            amount_out_min,
-            pool,
-            fee_bps,
-        )
-    }
-    
     /// How much of `amount_in` the pool would consume right now. The pool state
     /// cannot change between this view and the swap in the same transaction.
     fn consumable_amount(
@@ -725,19 +684,21 @@ Ok(read_config(&env).factory)
         }
     }
 
-    /// Common pool swap execution logic
-    fn execute_pool_swap(
+    /// Swap one leg through `pool`. With `source`, the router first pulls the
+    /// input from it; without, it spends tokens it already holds (later hops).
+    fn execute_leg(
         env: &Env,
+        source: Option<&Address>,
         recipient: &Address,
-        token_in: &Address,
-        token_out: &Address,
-        amount_in: i128,
-        amount_out_min: i128,
-        pool: &Address,
-        fee_bps: u32,
+        leg: &Leg,
     ) -> Result<SwapResult, RouterError> {
         let router_addr = env.current_contract_address();
-        let used = Self::consumable_amount(env, pool, token_in, amount_in)?;
+        // Only what the pool will consume, so nothing is left in the router.
+        let used = Self::consumable_amount(env, leg.pool, leg.token_in, leg.amount_in)?;
+
+        if let Some(source) = source {
+            token::Client::new(env, leg.token_in).transfer(source, &router_addr, &used);
+        }
 
         // The pool pulls the input with `transfer(router, pool, used)`. That is
         // a nested call, so the router has to authorize it explicitly.
@@ -745,42 +706,51 @@ Ok(read_config(&env).factory)
             env,
             InvokerContractAuthEntry::Contract(SubContractInvocation {
                 context: ContractContext {
-                    contract: token_in.clone(),
+                    contract: leg.token_in.clone(),
                     fn_name: Symbol::new(env, "transfer"),
-                    args: (router_addr.clone(), pool.clone(), used).into_val(env),
+                    args: (router_addr.clone(), leg.pool.clone(), used).into_val(env),
                 },
                 sub_invocations: Vec::new(env),
             }),
         ]);
-        
-        // Call pool swap - router is the sender
+
         let swap_result: PoolSwapResult = env.invoke_contract(
-            pool,
+            leg.pool,
             &Symbol::new(env, "swap"),
             vec![
                 env,
                 router_addr.clone().into_val(env),
-                token_in.clone().into_val(env),
-                amount_in.into_val(env),
-                amount_out_min.into_val(env),
+                leg.token_in.clone().into_val(env),
+                leg.amount_in.into_val(env),
+                leg.amount_out_min.into_val(env),
                 0u128.into_val(env), // no price limit
             ],
         );
-        
-        // Transfer output to final recipient if not router
+
         if recipient != &router_addr {
-            token::Client::new(env, token_out).transfer(
+            token::Client::new(env, leg.token_out).transfer(
                 &router_addr,
                 recipient,
                 &swap_result.amount_out,
             );
         }
-        
+
         Ok(SwapResult {
             amount_in: swap_result.amount_in,
             amount_out: swap_result.amount_out,
-            pools_used: vec![env, pool.clone()],
-            fee_tiers_used: vec![env, fee_bps],
+            pools_used: vec![env, leg.pool.clone()],
+            fee_tiers_used: vec![env, leg.fee_bps],
         })
     }
+
+}
+
+/// One swap through one pool.
+struct Leg<'a> {
+    pool: &'a Address,
+    fee_bps: u32,
+    token_in: &'a Address,
+    token_out: &'a Address,
+    amount_in: i128,
+    amount_out_min: i128,
 }

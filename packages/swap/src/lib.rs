@@ -8,7 +8,9 @@ pub use types::{PoolSwapResult, PreviewResult};
 
 // Re-export engine functions and types
 pub use engine::{
-    SwapState, 
+    SwapOutcome,
+    SwapParams,
+    SwapState,
     engine_swap,
     SwapError,
     quote_swap, 

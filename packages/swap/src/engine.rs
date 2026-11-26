@@ -4,7 +4,7 @@ use belugaswap_math::{
     compute_swap_step_with_target, mul_div_wide, get_sqrt_ratio_at_tick, get_tick_at_sqrt_ratio,
     mul_div, ONE_X64,
 };
-use belugaswap_tick::TickInfo;
+use belugaswap_tick::{ReadOnly, TickStore};
 
 /// Why a swap cannot be executed. The pool maps it to its contract error.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,113 +33,65 @@ pub struct SwapState {
     pub fee_growth_global_1: u128,
 }
 
+/// What to swap and at which fees.
+#[derive(Clone, Copy, Debug)]
+pub struct SwapParams {
+    /// Input amount, before fees
+    pub amount: i128,
+    /// true sells token0 for token1
+    pub zero_for_one: bool,
+    /// Price the swap may not cross; 0 for none
+    pub sqrt_price_limit_x64: u128,
+    pub fee_bps: i128,
+    /// Creator's share of the fee, in basis points of the fee
+    pub creator_fee_bps: i128,
+}
+
+/// Result of an executed swap.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SwapOutcome {
+    pub amount_in: i128,
+    pub amount_out: i128,
+    pub creator_fee: i128,
+}
+
 // ============================================================
 // PUBLIC SWAP FUNCTIONS
 // ============================================================
 
-/// Execute a swap with callbacks for storage access
-/// 
-/// # Arguments
-/// * `env` - Soroban environment
-/// * `state` - Mutable swap state
-/// * `read_tick` - Callback to read tick info from storage
-/// * `write_tick` - Callback to write tick info to storage
-/// * `emit_sync` - Callback to emit sync event
-/// * `amount_specified` - Input amount
-/// * `zero_for_one` - Direction (true = token0 -> token1)
-/// * `sqrt_price_limit_x64` - Price limit (0 for no limit)
-/// * `fee_bps` - Fee in basis points
-/// * `creator_fee_bps` - Creator fee in basis points
-/// 
-/// # Returns
-/// `(amount_in, amount_out)`
-pub fn engine_swap<N, F1, F2, F3>(
+/// Execute a swap, updating `state` and the ticks it crosses.
+pub fn engine_swap(
     env: &Env,
     state: &mut SwapState,
-    next_tick_in: N,
-    read_tick: F1,
-    write_tick: F2,
-    emit_sync: F3,
-    amount_specified: i128,
-    zero_for_one: bool,
-    sqrt_price_limit_x64: u128,
-    fee_bps: i128,
-    creator_fee_bps: i128,
-) -> Result<(i128, i128, i128), SwapError>
-where
-    N: Fn(&Env, i32, bool) -> Option<i32>,
-    F1: Fn(&Env, i32) -> TickInfo,
-    F2: Fn(&Env, i32, &TickInfo),
-    F3: Fn(&Env, i32, u128),
-{
-    if amount_specified < MIN_SWAP_AMOUNT {
+    store: &impl TickStore,
+    params: &SwapParams,
+) -> Result<SwapOutcome, SwapError> {
+    if params.amount < MIN_SWAP_AMOUNT {
         return Err(SwapError::AmountTooSmall);
     }
-
-
-
-    engine_swap_internal(
-        env,
-        state,
-        next_tick_in,
-        read_tick,
-        write_tick,
-        emit_sync,
-        amount_specified,
-        zero_for_one,
-        sqrt_price_limit_x64,
-        fee_bps,
-        creator_fee_bps,
-        true,  
-        false, 
-    )
+    run_swap(env, state, store, params, true)
 }
 
-/// Quote a swap without executing (read-only simulation)
-/// 
+/// Simulate a swap without writing anything; creator fee is ignored.
+///
 /// # Returns
 /// `(amount_in_used, amount_out, final_sqrt_price)`
-pub fn quote_swap<N, F>(
+pub fn quote_swap(
     env: &Env,
     state: &SwapState,
-    next_tick_in: N,
-    read_tick: F,
-    amount_in: i128,
-    zero_for_one: bool,
-    sqrt_price_limit_x64: u128,
-    fee_bps: i128,
-) -> (i128, i128, u128)
-where
-    N: Fn(&Env, i32, bool) -> Option<i32>,
-    F: Fn(&Env, i32) -> TickInfo,
-{
-    if amount_in < MIN_SWAP_AMOUNT || amount_in <= 0 {
+    store: &impl TickStore,
+    params: &SwapParams,
+) -> (i128, i128, u128) {
+    if params.amount < MIN_SWAP_AMOUNT {
         return (0, 0, state.sqrt_price_x64);
     }
 
-    // Clone state for simulation (doesn't modify original)
     let mut sim_state = state.clone();
-
-    let (amount_in_used, amount_out, _creator_fee) = match engine_swap_internal(
-        env,
-        &mut sim_state,
-        next_tick_in,
-        read_tick,
-        |_, _, _| {}, // no-op write
-        |_, _, _| {}, // no-op emit
-        amount_in,
-        zero_for_one,
-        sqrt_price_limit_x64,
-        fee_bps,
-        0,     // No creator fee for quotes
-        false, // don't panic
-        true,  // dry_run
-    ) {
-        Ok(result) => result,
-        Err(_) => return (0, 0, state.sqrt_price_x64),
-    };
-
-    (amount_in_used, amount_out, sim_state.sqrt_price_x64)
+    let params = SwapParams { creator_fee_bps: 0, ..*params };
+    match run_swap(env, &mut sim_state, &ReadOnly(store), &params, false) {
+        Ok(outcome) => (outcome.amount_in, outcome.amount_out, sim_state.sqrt_price_x64),
+        Err(_) => (0, 0, state.sqrt_price_x64),
+    }
 }
 
 /// Validate and preview a swap
@@ -155,29 +107,22 @@ where
 /// price_impact = (expected_out - actual_out) / expected_out * 10000
 /// Where expected_out is calculated from spot price before swap
 /// Both values are in output token units (apples to apples)
-pub fn validate_and_preview_swap<N, F>(
+pub fn validate_and_preview_swap(
     env: &Env,
     state: &SwapState,
-    next_tick_in: N,
-    read_tick: F,
-    amount_in: i128,
+    store: &impl TickStore,
+    params: &SwapParams,
     min_amount_out: i128,
-    zero_for_one: bool,
-    sqrt_price_limit_x64: u128,
-    fee_bps: i128,
-) -> Result<(i128, i128, i128, i128, u128), Symbol>
-where
-    N: Fn(&Env, i32, bool) -> Option<i32>,
-    F: Fn(&Env, i32) -> TickInfo + Clone,
-{
+) -> Result<(i128, i128, i128, i128, u128), Symbol> {
+    let SwapParams { amount: amount_in, zero_for_one, fee_bps, .. } = *params;
+
     // Validate input amount
     if amount_in < MIN_SWAP_AMOUNT {
         return Err(Symbol::new(env, "AMT_LOW"));
     }
 
     // Get actual quote (includes price impact from moving through ticks)
-    let (amount_in_used, amount_out, final_price) =
-        quote_swap(env, state, next_tick_in, read_tick, amount_in, zero_for_one, sqrt_price_limit_x64, fee_bps);
+    let (amount_in_used, amount_out, final_price) = quote_swap(env, state, store, params);
 
     if amount_out < MIN_OUTPUT_AMOUNT && state.liquidity <= 0 {
         return Err(Symbol::new(env, "NO_LIQ"));
@@ -257,28 +202,22 @@ fn calculate_expected_output(
 /// 
 /// Creator fee is taken from LP fee (not from total swap amount)
 /// Formula: creator_fee = (lp_fee * creator_fee_bps) / 10000
-fn engine_swap_internal<N, F1, F2, F3>(
+fn run_swap(
     env: &Env,
     state: &mut SwapState,
-    next_tick_in: N,
-    read_tick: F1,
-    write_tick: F2,
-    emit_sync: F3,
-    amount_specified: i128,
-    zero_for_one: bool,
-    sqrt_price_limit_x64: u128,
-    fee_bps: i128,
-    creator_fee_bps: i128,
+    store: &impl TickStore,
+    params: &SwapParams,
     // false for quotes: stop quietly instead of returning an error
     allow_panic: bool,
-    dry_run: bool,
-) -> Result<(i128, i128, i128), SwapError>
-where
-    N: Fn(&Env, i32, bool) -> Option<i32>,
-    F1: Fn(&Env, i32) -> TickInfo,
-    F2: Fn(&Env, i32, &TickInfo),
-    F3: Fn(&Env, i32, u128),
-{
+) -> Result<SwapOutcome, SwapError> {
+    let SwapParams {
+        amount: amount_specified,
+        zero_for_one,
+        sqrt_price_limit_x64,
+        fee_bps,
+        creator_fee_bps,
+    } = *params;
+
     // Initialize swap state
     let mut amount_remaining = amount_specified;
     let mut amount_out_total: i128 = 0;
@@ -320,7 +259,7 @@ where
 
         // Find next initialized tick. With none left in this direction there is
         // no liquidity to trade against.
-        let next_tick = match next_tick_in(env, current_tick, zero_for_one) {
+        let next_tick = match store.next_initialized_tick(env, current_tick, zero_for_one) {
             Some(tick) => tick,
             None => break,
         };
@@ -429,20 +368,12 @@ where
         if reached_tick {
             sqrt_price = sqrt_next;
 
-            // Cross tick - only modify storage if NOT dry_run
-            let liquidity_net = if dry_run {
-                let tick_info = read_tick(env, next_tick);
-                tick_info.liquidity_net
-            } else {
-                belugaswap_tick::cross_tick(
-                    env,
-                    &read_tick,
-                    &write_tick,
-                    next_tick,
-                    state.fee_growth_global_0,
-                    state.fee_growth_global_1,
-                )
-            };
+            let liquidity_net = belugaswap_tick::cross_tick(
+                env,
+                store,
+                next_tick,
+                (state.fee_growth_global_0, state.fee_growth_global_1),
+            );
 
             // Update liquidity based on direction
             if zero_for_one {
@@ -469,7 +400,7 @@ where
     // Validate output
     if amount_out_total < MIN_OUTPUT_AMOUNT {
         if !allow_panic {
-            return Ok((0, 0, 0));
+            return Ok(SwapOutcome { amount_in: 0, amount_out: 0, creator_fee: 0 });
         }
         return Err(if state.liquidity <= 0 {
             SwapError::NoLiquidity
@@ -483,11 +414,11 @@ where
     state.liquidity = liquidity;
     state.current_tick = current_tick;
 
-    // Emit sync event (no-op in dry_run via callback)
-    emit_sync(env, state.current_tick, state.sqrt_price_x64);
-
-    let amount_in_total = amount_specified.saturating_sub(amount_remaining);
-    Ok((amount_in_total, amount_out_total, total_creator_fee))
+    Ok(SwapOutcome {
+        amount_in: amount_specified.saturating_sub(amount_remaining),
+        amount_out: amount_out_total,
+        creator_fee: total_creator_fee,
+    })
 }
 
 // ============================================================

@@ -3,6 +3,7 @@
 pub mod types;
 pub mod update;
 pub mod fee_growth;
+pub mod bitmap;
 
 // Re-export types
 pub use types::TickInfo;
@@ -11,11 +12,12 @@ pub use types::TickInfo;
 pub use update::{
     update_tick, 
     cross_tick, 
-    find_next_initialized_tick, 
     is_valid_tick,
     is_aligned_tick,  // <-- ADDED: was missing
     align_tick,       // <-- ADDED: was missing
 };
+
+pub use bitmap::{flip_tick, next_initialized_tick};
 
 // Re-export fee growth functions
 pub use fee_growth::get_fee_growth_inside;

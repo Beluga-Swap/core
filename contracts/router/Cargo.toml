@@ -10,6 +10,7 @@ crate-type = ["cdylib", "rlib"]
 soroban-sdk = { workspace = true }
 
 [dev-dependencies]
+belugaswap-pool = { path = "../pool" }
 soroban-sdk = { workspace = true, features = ["testutils"] }
 
 [profile.release]

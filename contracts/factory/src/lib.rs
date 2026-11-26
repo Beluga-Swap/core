@@ -282,7 +282,6 @@ impl BelugaFactory {
         // === REGISTER POOL ===
         write_pool(&env, &token0, &token1, fee_bps, &pool_address);
         add_to_pool_list(&env, &pool_address);
-        increment_pool_count(&env);
         
         // === EMIT EVENTS ===
         emit_pool_created(&env, &pool_address, &token0, &token1, &creator, fee_bps);
@@ -363,9 +362,15 @@ impl BelugaFactory {
         read_pool_count(&env)
     }
     
-    /// Get all deployed pool addresses
+    /// Get the first deployed pool addresses (at most 100). Use `get_pools`
+    /// to page through the whole registry.
     pub fn get_all_pool_addresses(env: Env) -> Vec<Address> {
-        read_pool_list(&env)
+        read_pool_page(&env, 0, MAX_POOL_PAGE)
+    }
+    
+    /// Get up to `limit` pool addresses (at most 100) from creation index `start`
+    pub fn get_pools(env: Env, start: u32, limit: u32) -> Vec<Address> {
+        read_pool_page(&env, start, limit)
     }
     
     /// Get fee tier configuration

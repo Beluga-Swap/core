@@ -4,7 +4,9 @@
 
 use soroban_sdk::Env;
 use crate::constants::{MIN_TICK, MAX_TICK};
-use crate::q64::{mul_q64, div_q64, mul_div, ONE_X64};
+use crate::q64::mul_q64;
+use crate::q64::{div_q64, mul_div, ONE_X64};
+use crate::wide::mul_div_wide;
 
 /// Convert tick to sqrt price in Q64.64 format
 /// Formula: sqrt(1.0001^tick) * 2^64
@@ -95,8 +97,11 @@ pub fn get_tick_at_sqrt_ratio(sqrt_price_x64: u128) -> i32 {
 }
 
 /// Calculate next sqrt price given input amount
+///
+/// Rounds in the pool's favour: up when the price falls, down when it rises, so
+/// the price never moves further than the input pays for.
 pub fn get_next_sqrt_price_from_input(
-    env: &Env,
+    _env: &Env,
     sqrt_price: u128,
     liquidity: u128,
     amount_in: u128,
@@ -107,16 +112,22 @@ pub fn get_next_sqrt_price_from_input(
     }
 
     if zero_for_one {
-        let product = amount_in.saturating_mul(sqrt_price);
-        let numerator = liquidity.saturating_mul(sqrt_price);
-        let liq_shifted = liquidity << 64;
-        let denominator = liq_shifted.saturating_add(product);
-
-        if denominator == 0 { return sqrt_price; }
-        mul_div(env, numerator, ONE_X64, denominator)
+        // L * 2^64 * P / (L * 2^64 + amount_in * P)
+        let exact_denominator = liquidity
+            .checked_mul(ONE_X64)
+            .and_then(|l| amount_in.checked_mul(sqrt_price).and_then(|p| l.checked_add(p)));
+        let next = match exact_denominator {
+            Some(denominator) => mul_div_wide(liquidity, sqrt_price, 64, denominator, 1, true),
+            // Same formula divided through by P, for values too large above.
+            None => {
+                let denominator = mul_div_wide(liquidity, 1, 64, sqrt_price, 1, false)
+                    .saturating_add(amount_in);
+                mul_div_wide(liquidity, 1, 64, denominator, 1, true)
+            }
+        };
+        next.min(sqrt_price)
     } else {
-        let quotient = div_q64(amount_in, liquidity);
-        sqrt_price.saturating_add(quotient)
+        sqrt_price.saturating_add(mul_div_wide(amount_in, 1, 64, liquidity, 1, false))
     }
 }
 

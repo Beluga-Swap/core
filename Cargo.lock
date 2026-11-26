@@ -220,6 +220,7 @@ dependencies = [
 name = "belugaswap-router"
 version = "0.1.0"
 dependencies = [
+ "belugaswap-pool",
  "soroban-sdk",
 ]
 

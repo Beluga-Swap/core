@@ -109,8 +109,7 @@ stellar contract invoke --id $FACTORY --source $SOURCE --network $NETWORK \
     "amount0_desired": 10000000000,
     "amount1_desired": 10000000000,
     "lower_tick": -887220,
-    "upper_tick": 887220,
-    "lock_duration": 0
+    "upper_tick": 887220
   }'
 ```
 
@@ -119,7 +118,7 @@ stellar contract invoke --id $FACTORY --source $SOURCE --network $NETWORK \
 ### Contracts
 | Contract | Description | Docs |
 |----------|-------------|------|
-| **Factory** | Pool deployment, creator locks, fee tiers | [README](contracts/factory/README.md) |
+| **Factory** | Pool deployment, registry, fee tiers | [README](contracts/factory/README.md) |
 | **Pool** | Swaps, liquidity management, fee collection | [README](contracts/pool/README.md) |
 | **Router** | Smart routing, multi-hop, split swaps | [README](contracts/router/README.md) |
 
@@ -145,7 +144,7 @@ stellar contract invoke --id $FACTORY --source $SOURCE --network $NETWORK \
 | Role | Permissions |
 |------|-------------|
 | **Admin** | Set fee tiers, update router, transfer admin |
-| **Pool Creator** | Creates the pool with its initial liquidity, optionally locked |
+| **Pool Creator** | Creates the pool with its initial liquidity (an ordinary, withdrawable position) |
 | **LP Provider** | Add/remove liquidity, collect fees |
 | **Trader** | Swap via Router or direct Pool |
 

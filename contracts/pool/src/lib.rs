@@ -5,7 +5,7 @@
 #![allow(clippy::too_many_arguments)]
 
 use soroban_sdk::{
-    contract, contractimpl, panic_with_error, token, vec, Address, Env, IntoVal, Symbol,
+    contract, contractimpl, panic_with_error, token, Address, Env, Symbol,
 };
 
 // External packages
@@ -390,16 +390,10 @@ impl BelugaPool {
             panic_with_error!(&env, PoolError::InvalidLiquidityAmount);
         }
         
-        let config = read_pool_config(&env);
         let mut state = read_pool_state(&env);
         
         let lower_aligned = snap_tick_to_spacing(lower_tick, state.tick_spacing);
         let upper_aligned = snap_tick_to_spacing(upper_tick, state.tick_spacing);
-        
-        // Check if position is locked (only affects creator's locked position)
-        if Self::is_position_locked(&env, &config, &owner, lower_aligned, upper_aligned) {
-            panic_with_error!(&env, PoolError::PositionLocked);
-        }
         
         let mut pos = read_position(&env, &owner, lower_aligned, upper_aligned);
         
@@ -596,41 +590,6 @@ impl BelugaPool {
         
         (liquidity, amount0, amount1)
     }
-    
-    /// Check if a position is locked by querying factory
-    fn is_position_locked(
-        env: &Env,
-        config: &PoolConfig,
-        owner: &Address,
-        lower_tick: i32,
-        upper_tick: i32,
-    ) -> bool {
-        // Only check lock for creator - other LPs are not affected
-        if owner != &config.creator {
-            return false;
-        }
-        
-        let pool_addr = env.current_contract_address();
-        
-        // Query factory: is_liquidity_locked(pool, creator, lower_tick, upper_tick) -> bool
-        let result = env.try_invoke_contract::<bool, soroban_sdk::Error>(
-            &config.factory,
-            &Symbol::new(env, "is_liquidity_locked"),
-            vec![
-                env,
-                pool_addr.into_val(env),
-                owner.clone().into_val(env),
-                lower_tick.into_val(env),
-                upper_tick.into_val(env),
-            ],
-        );
-        
-        match result {
-            Ok(Ok(is_locked)) => is_locked,
-            _ => true,
-        }
-    }
-    
 }
 
 // ============================================================

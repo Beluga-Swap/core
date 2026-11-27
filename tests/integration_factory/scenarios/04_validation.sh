@@ -36,8 +36,7 @@ assert_fails "Same token rejected" \
             "amount0_desired": 10000000,
             "amount1_desired": 10000000,
             "lower_tick": -600,
-            "upper_tick": 600,
-            "lock_duration": 0
+            "upper_tick": 600
         }'
 
 # Test 2: Invalid fee tier rejected
@@ -57,8 +56,7 @@ assert_fails "Invalid fee tier rejected" \
             "amount0_desired": 10000000,
             "amount1_desired": 10000000,
             "lower_tick": -600,
-            "upper_tick": 600,
-            "lock_duration": 0
+            "upper_tick": 600
         }'
 
 # Test 3: Duplicate pool rejected
@@ -78,8 +76,7 @@ assert_fails "Duplicate pool rejected" \
             "amount0_desired": 10000000,
             "amount1_desired": 10000000,
             "lower_tick": -600,
-            "upper_tick": 600,
-            "lock_duration": 0
+            "upper_tick": 600
         }'
 
 log_success "Scenario 04 completed"

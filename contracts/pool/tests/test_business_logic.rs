@@ -3,30 +3,14 @@
 
 mod common;
 
-use belugaswap_math::get_sqrt_ratio_at_tick;
 use belugaswap_pool::BelugaPoolClient;
 use soroban_sdk::{
-    contract, contractimpl, testutils::Address as _, token::TokenClient, Address, Env, Symbol,
+    testutils::Address as _, token::TokenClient, Address, Env,
 };
-
-/// Factory stub whose creator lock can be set per test.
-#[contract]
-pub struct MockFactory;
-
-#[contractimpl]
-impl MockFactory {
-    pub fn set_lock(env: Env, lower: i32, upper: i32) {
-        env.storage().instance().set(&Symbol::new(&env, "lock"), &(lower, upper));
-    }
-    pub fn is_liquidity_locked(env: Env, _p: Address, _c: Address, lower: i32, upper: i32) -> bool {
-        env.storage().instance().get(&Symbol::new(&env, "lock")) == Some((lower, upper))
-    }
-}
 
 struct Pool<'a> {
     env: &'a Env,
     c: BelugaPoolClient<'a>,
-    factory: Address,
     creator: Address,
     t0: Address,
     t1: Address,
@@ -38,7 +22,7 @@ impl<'a> Pool<'a> {
     fn new(env: &'a Env) -> Self {
         env.mock_all_auths();
         env.cost_estimate().budget().reset_unlimited();
-        let factory = env.register(MockFactory, ());
+        let factory = Address::generate(env);
         let creator = Address::generate(env);
         let a = common::create_token(env, &creator);
         let b = common::create_token(env, &creator);
@@ -47,7 +31,7 @@ impl<'a> Pool<'a> {
             &FEE_BPS, &(1u128 << 64), &60,
         );
         let s = c.get_pool_state();
-        Pool { env, c, factory, creator, t0: s.token0, t1: s.token1 }
+        Pool { env, c, creator, t0: s.token0, t1: s.token1 }
     }
 
     fn user(&self, amount: i128) -> Address {
@@ -300,23 +284,24 @@ fn swap_needs_the_senders_signature() {
     assert!(p.c.try_swap(&victim, &p.t0, &1_000_000, &0, &0).is_err());
 }
 
-// --- creator lock --------------------------------------------------------
+// --- creator position ----------------------------------------------------
 
 #[test]
-fn locked_creator_position_cannot_be_withdrawn() {
+fn creator_can_withdraw_initial_position_at_once() {
+    // Arrange: the factory mints the creator's initial position.
     let env = Env::default();
     let p = Pool::new(&env);
-    MockFactoryClient::new(&env, &p.factory).set_lock(&-600, &600);
     common::mint_tokens(&env, &p.t0, &p.c.address, 1_000_000_000);
     common::mint_tokens(&env, &p.t1, &p.c.address, 1_000_000_000);
     let l = p.c.mint(&p.creator, &-600, &600, &1_000_000_000, &1_000_000_000);
 
-    // Every spelling that snaps to the locked range is refused.
-    for (lo, hi) in [(-600, 600), (-599, 601), (-541, 659), (-600, 659)] {
-        assert!(p.c.try_remove_liquidity(&p.creator, &lo, &hi, &l, &0, &0).is_err(), "[{lo},{hi})");
-    }
-    // Fees stay claimable while locked.
-    let trader = p.user(10_000_000_000);
-    p.swap(&trader, true, 100_000_000);
-    assert!(p.c.collect_fees(&p.creator, &-600, &600).0 > 0);
+    // Act: withdraw everything in the same ledger.
+    p.c.remove_liquidity(&p.creator, &-600, &600, &l, &0, &0);
+
+    // Assert: refund plus withdrawal is the deposit, less rounding dust,
+    // and the position is empty.
+    let (b0, b1) = p.bal(&p.creator);
+    assert!((1_000_000_000 - 2..=1_000_000_000).contains(&b0), "token0 back: {b0}");
+    assert!((1_000_000_000 - 2..=1_000_000_000).contains(&b1), "token1 back: {b1}");
+    assert_eq!(p.c.get_position(&p.creator, &-600, &600).liquidity, 0);
 }

@@ -1,8 +1,11 @@
 # BelugaSwap Technical Architecture
 
-> **Outdated sections:** the pool creator fee described below (creator fee rules,
-> `claim_creator_fees`, `is_creator_fee_active`, fee revocation on unlock) has
-> been removed. The whole swap fee now goes to LPs; the creator lock remains.
+> **Outdated sections:** the pool creator fee and the creator liquidity lock
+> described below (creator fee rules, `claim_creator_fees`,
+> `is_creator_fee_active`, `lock_duration`, `CreatorLock`,
+> `unlock_creator_liquidity`, `is_liquidity_locked`) have been removed. The whole
+> swap fee goes to LPs, and the creator's initial position is an ordinary
+> position that can be withdrawn at any time.
 
 ## Table of Contents
 1. [Introduction](#1-introduction)

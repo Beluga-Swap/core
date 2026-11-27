@@ -33,28 +33,6 @@ pub fn emit_pool_created(
     );
 }
 
-/// Emitted when creator locks liquidity
-pub fn emit_creator_locked(
-    env: &Env,
-    pool: &Address,
-    creator: &Address,
-    liquidity: i128,
-    lock_end: u32,
-    is_permanent: bool,
-) {
-    env.events().publish(
-        (Symbol::new(env, "CreatorLocked"),),
-        (pool.clone(), creator.clone(), liquidity, lock_end, is_permanent),
-    );
-}
-
-/// Emitted when creator unlocks liquidity
-pub fn emit_creator_unlocked(env: &Env, pool: &Address, creator: &Address, liquidity: i128) {
-    env.events().publish(
-        (Symbol::new(env, "CreatorUnlocked"),),
-        (pool.clone(), creator.clone(), liquidity),
-    );
-}
 /// Emitted when fee tier is updated
 pub fn emit_fee_tier_updated(env: &Env, fee_bps: u32, tick_spacing: i32, enabled: bool) {
     env.events().publish(

@@ -24,9 +24,6 @@ impl MockFactory {
         }
         env.storage().instance().get(&Symbol::new(&env, "pool"))
     }
-    pub fn is_liquidity_locked(_e: Env, _p: Address, _c: Address, _l: i32, _u: i32) -> bool {
-        false
-    }
 }
 
 struct World<'a> {

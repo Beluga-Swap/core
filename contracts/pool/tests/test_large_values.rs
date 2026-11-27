@@ -5,18 +5,8 @@ mod common;
 use belugaswap_math::get_sqrt_ratio_at_tick;
 use belugaswap_pool::BelugaPoolClient;
 use soroban_sdk::{
-    contract, contractimpl, testutils::Address as _, token::TokenClient, Address, Env,
+    testutils::Address as _, token::TokenClient, Address, Env,
 };
-
-#[contract]
-pub struct MockFactory;
-
-#[contractimpl]
-impl MockFactory {
-    pub fn is_liquidity_locked(_e: Env, _p: Address, _c: Address, _l: i32, _u: i32) -> bool {
-        false
-    }
-}
 
 struct Pool<'a> {
     env: &'a Env,
@@ -29,7 +19,7 @@ impl<'a> Pool<'a> {
     fn new(env: &'a Env, tick: i32) -> Self {
         env.mock_all_auths();
         env.cost_estimate().budget().reset_unlimited();
-        let factory = env.register(MockFactory, ());
+        let factory = Address::generate(env);
         let creator = Address::generate(env);
         let a = common::create_token(env, &creator);
         let b = common::create_token(env, &creator);

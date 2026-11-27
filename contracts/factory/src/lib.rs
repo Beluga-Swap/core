@@ -2,7 +2,7 @@
 
 //! # BelugaSwap Factory
 //! 
-//! Permissionless pool deployment with creator incentives.
+//! Permissionless pool deployment.
 //! 
 //! ## Deployment Flow:
 //! 1. Deploy Factory → initialize(admin, pool_wasm_hash)
@@ -11,11 +11,10 @@
 //! 4. Create pools via Factory
 //! 
 //! ## Responsibilities:
-//! 1. Create pools (atomic: deploy + init + LP + lock)
+//! 1. Create pools (atomic: deploy + init + initial LP)
 //! 2. Fee tier standardization
 //! 3. Duplicate prevention
-//! 4. Creator lock management
-//! 5. Router registry
+//! 4. Router registry
 
 use soroban_sdk::{
     contract, contractimpl, vec, Address, BytesN, Env, IntoVal, Symbol, Val, Vec,
@@ -35,9 +34,6 @@ pub use types::*;
 // ============================================================
 // CONSTANTS
 // ============================================================
-
-/// Minimum lock duration: ~7 days at 5s/ledger
-const MIN_LOCK_DURATION: u32 = 120_960;
 
 /// Minimum initial liquidity per token (0.1 with 7 decimals)
 const MIN_INITIAL_LIQUIDITY: i128 = 1_000_000;
@@ -105,7 +101,8 @@ impl BelugaFactory {
     // POOL CREATION
     // ========================================================
     
-    /// Create pool (atomic: deploy + init + LP + lock)
+    /// Create pool (atomic: deploy + init + initial LP). The initial
+    /// position is an ordinary position the creator can withdraw at any time.
     /// 
     /// # Arguments
     /// * `creator` - Pool creator (must provide initial LP)
@@ -127,7 +124,6 @@ impl BelugaFactory {
         let amount1_desired = params.amount1_desired;
         let lower_tick = params.lower_tick;
         let upper_tick = params.upper_tick;
-        let lock_duration = params.lock_duration;
         
         let config = read_config(&env);
         
@@ -171,12 +167,6 @@ impl BelugaFactory {
         // Validate amounts
         if amt0 < MIN_INITIAL_LIQUIDITY || amt1 < MIN_INITIAL_LIQUIDITY {
             return Err(FactoryError::InsufficientInitialLiquidity);
-        }
-        
-        // Validate lock duration
-        let is_permanent = lock_duration == 0;
-        if !is_permanent && lock_duration < MIN_LOCK_DURATION {
-            return Err(FactoryError::InvalidLockDuration);
         }
         
         // Validate price
@@ -227,75 +217,14 @@ impl BelugaFactory {
             return Err(FactoryError::InsufficientInitialLiquidity);
         }
         
-        // === REGISTER LOCK ===
-        let current_ledger = env.ledger().sequence();
-        let lock_end = if is_permanent {
-            u32::MAX
-        } else {
-            current_ledger.saturating_add(lock_duration)
-        };
-        
-        let creator_lock = CreatorLock {
-            pool: pool_address.clone(),
-            creator: creator.clone(),
-            liquidity,
-            lower_tick,
-            upper_tick,
-            lock_start: current_ledger,
-            lock_end,
-            is_permanent,
-            is_unlocked: false,
-        };
-        write_creator_lock(&env, &pool_address, &creator, &creator_lock);
-        
         // === REGISTER POOL ===
         write_pool(&env, &token0, &token1, fee_bps, &pool_address);
         add_to_pool_list(&env, &pool_address);
         
         // === EMIT EVENTS ===
         emit_pool_created(&env, &pool_address, &token0, &token1, &creator, fee_bps);
-        emit_creator_locked(&env, &pool_address, &creator, liquidity, lock_end, is_permanent);
         
         Ok(pool_address)
-    }
-    
-    /// Release the creator's locked liquidity once the lock period has ended
-    pub fn unlock_creator_liquidity(
-        env: Env,
-        pool_address: Address,
-        creator: Address,
-    ) -> Result<i128, FactoryError> {
-        extend_instance(&env);
-        creator.require_auth();
-        
-        let mut lock = read_creator_lock(&env, &pool_address, &creator)
-            .ok_or(FactoryError::CreatorLockNotFound)?;
-        
-        if lock.creator != creator {
-            return Err(FactoryError::NotPoolCreator);
-        }
-        
-        if lock.is_unlocked {
-            return Err(FactoryError::AlreadyUnlocked);
-        }
-        
-        // Check if permanent lock
-        if lock.is_permanent {
-            return Err(FactoryError::LiquidityStillLocked);
-        }
-        
-        // Check if lock period has ended
-        let current_ledger = env.ledger().sequence();
-        if current_ledger < lock.lock_end {
-            return Err(FactoryError::LiquidityStillLocked);
-        }
-        
-        lock.is_unlocked = true;
-        write_creator_lock(&env, &pool_address, &creator, &lock);
-        
-        emit_creator_unlocked(&env, &pool_address, &creator, lock.liquidity);
-        
-        Ok(lock.liquidity)
     }
     
     // ========================================================
@@ -343,41 +272,6 @@ impl BelugaFactory {
     /// Get fee tier configuration
     pub fn get_fee_tier(env: Env, fee_bps: u32) -> Option<FeeTier> {
         read_fee_tier(&env, fee_bps)
-    }
-    
-    /// Get creator lock info for a pool
-    pub fn get_creator_lock(
-        env: Env, 
-        pool_address: Address, 
-        creator: Address
-    ) -> Option<CreatorLock> {
-        read_creator_lock(&env, &pool_address, &creator)
-    }
-    
-    /// Check if creator's liquidity is still locked
-    pub fn is_liquidity_locked(
-        env: Env,
-        pool_address: Address,
-        creator: Address,
-        lower_tick: i32,
-        upper_tick: i32,
-    ) -> bool {
-        match read_creator_lock(&env, &pool_address, &creator) {
-            Some(lock) => {
-                if lock.lower_tick != lower_tick || lock.upper_tick != upper_tick {
-                    return false;
-                }
-                if lock.is_unlocked {
-                    return false;
-                }
-                if lock.is_permanent {
-                    return true;
-                }
-                let current_ledger = env.ledger().sequence();
-                current_ledger < lock.lock_end
-            }
-            None => false,
-        }
     }
     
     /// Check if factory is ready (initialized + router set)

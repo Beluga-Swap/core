@@ -13,8 +13,8 @@ const DAY_IN_LEDGERS: u32 = 17_280;
 /// Entries are extended to `TTL_BUMP` once fewer than `TTL_THRESHOLD` ledgers
 /// remain, so an active entry is re-extended about once a day instead of on
 /// every access.
-const TTL_THRESHOLD: u32 = 30 * DAY_IN_LEDGERS;
-const TTL_BUMP: u32 = 31 * DAY_IN_LEDGERS;
+const TTL_THRESHOLD: u32 = 119 * DAY_IN_LEDGERS;
+const TTL_BUMP: u32 = 120 * DAY_IN_LEDGERS;
 
 /// Keeps the contract instance and its code alive.
 pub fn extend_instance(env: &Env) {

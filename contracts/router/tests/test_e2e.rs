@@ -24,9 +24,6 @@ impl MockFactory {
         }
         env.storage().instance().get(&Symbol::new(&env, "pool"))
     }
-    pub fn is_creator_fee_active(_e: Env, _p: Address, _c: Address) -> bool {
-        false
-    }
     pub fn is_liquidity_locked(_e: Env, _p: Address, _c: Address, _l: i32, _u: i32) -> bool {
         false
     }
@@ -51,7 +48,7 @@ fn world(env: &Env) -> World<'_> {
     let b = env.register_stellar_asset_contract_v2(admin.clone()).address();
     let pool_id = env.register(
         BelugaPool,
-        (&factory, &router_id, &admin, &a, &b, 30u32, 10u32, 1u128 << 64, 60i32),
+        (&factory, &router_id, &admin, &a, &b, 30u32, 1u128 << 64, 60i32),
     );
     let pool = BelugaPoolClient::new(env, &pool_id);
     MockFactoryClient::new(env, &factory).set(&pool_id);

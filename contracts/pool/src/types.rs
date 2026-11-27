@@ -25,8 +25,6 @@ pub struct PoolConfig {
     pub token_b: Address,
     /// Trading fee in basis points (e.g., 30 = 0.30%)
     pub fee_bps: u32,
-    /// Creator's share of trading fees in basis points
-    pub creator_fee_bps: u32,
 }
 
 // ============================================================
@@ -44,19 +42,4 @@ pub struct PoolState {
     pub token1: Address,
     pub fee_growth_global_0: u128,
     pub fee_growth_global_1: u128,
-    pub creator_fees_0: u128,
-    pub creator_fees_1: u128,
 }
-
-// ============================================================
-// CREATOR FEES INFO
-// ============================================================
-
-#[contracttype]
-#[derive(Clone, Debug)]
-#[derive(Default)]
-pub struct CreatorFeesInfo {
-    pub fees_token0: u128,
-    pub fees_token1: u128,
-}
-

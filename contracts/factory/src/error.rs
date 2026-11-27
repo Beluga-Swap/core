@@ -19,7 +19,6 @@ pub enum FactoryError {
     InvalidTickSpacing = 13,
     InvalidTickRange = 14,
     InvalidInitialPrice = 15,
-    InvalidCreatorFee = 16,
     
     // Liquidity
     InsufficientInitialLiquidity = 20,
@@ -28,7 +27,8 @@ pub enum FactoryError {
     
     // Creator
     NotPoolCreator = 30,
-    CreatorFeeRevoked = 31,
+    /// Creator lock was already released
+    AlreadyUnlocked = 31,
     CreatorLockNotFound = 32,
     
     // Admin

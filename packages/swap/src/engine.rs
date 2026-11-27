@@ -43,8 +43,6 @@ pub struct SwapParams {
     /// Price the swap may not cross; 0 for none
     pub sqrt_price_limit_x64: u128,
     pub fee_bps: i128,
-    /// Creator's share of the fee, in basis points of the fee
-    pub creator_fee_bps: i128,
 }
 
 /// Result of an executed swap.
@@ -52,7 +50,6 @@ pub struct SwapParams {
 pub struct SwapOutcome {
     pub amount_in: i128,
     pub amount_out: i128,
-    pub creator_fee: i128,
 }
 
 // ============================================================
@@ -72,7 +69,7 @@ pub fn engine_swap(
     run_swap(env, state, store, params, true)
 }
 
-/// Simulate a swap without writing anything; creator fee is ignored.
+/// Simulate a swap without writing anything.
 ///
 /// # Returns
 /// `(amount_in_used, amount_out, final_sqrt_price)`
@@ -87,8 +84,7 @@ pub fn quote_swap(
     }
 
     let mut sim_state = state.clone();
-    let params = SwapParams { creator_fee_bps: 0, ..*params };
-    match run_swap(env, &mut sim_state, &ReadOnly(store), &params, false) {
+    match run_swap(env, &mut sim_state, &ReadOnly(store), params, false) {
         Ok(outcome) => (outcome.amount_in, outcome.amount_out, sim_state.sqrt_price_x64),
         Err(_) => (0, 0, state.sqrt_price_x64),
     }
@@ -198,10 +194,8 @@ fn calculate_expected_output(
 // INTERNAL SWAP LOGIC
 // ============================================================
 
-/// Core swap logic following Uniswap V3 pattern
-/// 
-/// Creator fee is taken from LP fee (not from total swap amount)
-/// Formula: creator_fee = (lp_fee * creator_fee_bps) / 10000
+/// Core swap logic following the Uniswap V3 pattern. The whole fee goes to the
+/// in-range liquidity.
 fn run_swap(
     env: &Env,
     state: &mut SwapState,
@@ -215,13 +209,11 @@ fn run_swap(
         zero_for_one,
         sqrt_price_limit_x64,
         fee_bps,
-        creator_fee_bps,
     } = *params;
 
     // Initialize swap state
     let mut amount_remaining = amount_specified;
     let mut amount_out_total: i128 = 0;
-    let mut total_creator_fee: i128 = 0;
 
     let mut sqrt_price = state.sqrt_price_x64;
     let mut liquidity = state.liquidity;
@@ -332,24 +324,13 @@ fn run_swap(
             break;
         }
 
-        // Calculate creator fee (percentage of LP fee)
-        let creator_fee = if creator_fee_bps > 0 && step_fee > 0 {
-            step_fee
-                .saturating_mul(creator_fee_bps)
-                .saturating_div(10000)
-        } else {
-            0
-        };
-
-        // LP fee = total fee - creator fee
-        let lp_fee = step_fee.saturating_sub(creator_fee);
+        let lp_fee = step_fee;
 
         // Update amounts
         amount_remaining = amount_remaining
             .saturating_sub(amount_in)
             .saturating_sub(step_fee);
         amount_out_total = amount_out_total.saturating_add(amount_out);
-        total_creator_fee = total_creator_fee.saturating_add(creator_fee);
 
         // Update fee growth global for LP (Uniswap V3 style)
         if liquidity > 0 && lp_fee > 0 {
@@ -400,7 +381,7 @@ fn run_swap(
     // Validate output
     if amount_out_total < MIN_OUTPUT_AMOUNT {
         if !allow_panic {
-            return Ok(SwapOutcome { amount_in: 0, amount_out: 0, creator_fee: 0 });
+            return Ok(SwapOutcome { amount_in: 0, amount_out: 0 });
         }
         return Err(if state.liquidity <= 0 {
             SwapError::NoLiquidity
@@ -417,7 +398,6 @@ fn run_swap(
     Ok(SwapOutcome {
         amount_in: amount_specified.saturating_sub(amount_remaining),
         amount_out: amount_out_total,
-        creator_fee: total_creator_fee,
     })
 }
 

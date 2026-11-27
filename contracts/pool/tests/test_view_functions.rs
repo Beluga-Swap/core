@@ -30,7 +30,6 @@ fn test_get_pool_config() {
     // Verify configuration
     assert_eq!(config.creator, creator);
     assert_eq!(config.fee_bps, common::DEFAULT_FEE_BPS);
-    assert_eq!(config.creator_fee_bps, common::DEFAULT_CREATOR_FEE_BPS);
 }
 
 #[test]

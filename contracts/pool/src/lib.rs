@@ -13,7 +13,7 @@ use belugaswap_math::{
     get_amounts_for_liquidity, get_amounts_for_liquidity_rounding_up, get_liquidity_for_amounts,
     get_tick_at_sqrt_ratio,snap_tick_to_spacing, 
     MIN_LIQUIDITY, get_sqrt_ratio_at_tick, 
-    constants::{MAX_CREATOR_FEE_BPS, MAX_FEE_BPS, MAX_TICK, MIN_CREATOR_FEE_BPS, MIN_TICK}
+    constants::{MAX_FEE_BPS, MAX_TICK, MIN_TICK}
 };
 use belugaswap_position::{PositionInfo, modify_position, update_position, calculate_pending_fees};
 use belugaswap_swap::{
@@ -30,7 +30,7 @@ pub mod types;
 pub use error::PoolError;
 use events::*;
 use storage::*;
-use types::{PoolConfig, PoolState, CreatorFeesInfo};
+use types::{PoolConfig, PoolState};
 
 #[contract]
 pub struct BelugaPool;
@@ -51,15 +51,11 @@ impl BelugaPool {
         token_a: Address,
         token_b: Address,
         fee_bps: u32,
-        creator_fee_bps: u32,
         sqrt_price_x64: u128,
         tick_spacing: i32,
     ) {
         if fee_bps == 0 || fee_bps > MAX_FEE_BPS {
             panic_with_error!(&env, PoolError::InvalidFee);
-        }
-        if !(MIN_CREATOR_FEE_BPS..=MAX_CREATOR_FEE_BPS).contains(&creator_fee_bps) {
-            panic_with_error!(&env, PoolError::InvalidCreatorFee);
         }
         if tick_spacing <= 0 {
             panic_with_error!(&env, PoolError::InvalidTickSpacing);
@@ -83,12 +79,11 @@ impl BelugaPool {
             token_a,
             token_b,
             fee_bps,
-            creator_fee_bps,
         });
         init_pool_state(&env, sqrt_price_x64, current_tick, tick_spacing, token0, token1);
         extend_instance(&env);
 
-        emit_initialized(&env, fee_bps, creator_fee_bps, tick_spacing);
+        emit_initialized(&env, fee_bps, tick_spacing);
         emit_pool_init(&env, sqrt_price_x64, current_tick, tick_spacing);
     }
     
@@ -143,15 +138,6 @@ impl BelugaPool {
         }
     }
     
-    /// Get accumulated creator fees
-    pub fn get_creator_fees(env: Env) -> CreatorFeesInfo {
-        let pool = read_pool_state(&env);
-        CreatorFeesInfo {
-            fees_token0: pool.creator_fees_0,
-            fees_token1: pool.creator_fees_1,
-        }
-    }
-    
     /// Get swap direction based on input token
     pub fn get_swap_direction(env: Env, token_in: Address) -> bool {
         let pool = read_pool_state(&env);
@@ -198,7 +184,6 @@ impl BelugaPool {
             zero_for_one,
             sqrt_price_limit_x64,
             fee_bps: config.fee_bps as i128,
-            creator_fee_bps: 0,
         };
         let ticks = PoolTicks { tick_spacing: pool.tick_spacing };
 
@@ -246,8 +231,6 @@ impl BelugaPool {
             panic_with_error!(&env, PoolError::InvalidToken);
         };
         
-        // Safe creator fee check - won't panic if factory call fails
-        let creator_fee_bps = Self::get_active_creator_fee_bps_safe(&env, &config);
         
         let mut swap_state = SwapState {
             sqrt_price_x64: pool_state.sqrt_price_x64,
@@ -263,10 +246,9 @@ impl BelugaPool {
             zero_for_one,
             sqrt_price_limit_x64,
             fee_bps: config.fee_bps as i128,
-            creator_fee_bps,
         };
         let ticks = PoolTicks { tick_spacing: pool_state.tick_spacing };
-        let SwapOutcome { amount_in: amount_in_used, amount_out, creator_fee } =
+        let SwapOutcome { amount_in: amount_in_used, amount_out } =
             engine_swap(&env, &mut swap_state, &ticks, &params)
                 .unwrap_or_else(|err| panic_with_error!(&env, PoolError::from(err)));
         emit_sync_tick(&env, swap_state.current_tick, swap_state.sqrt_price_x64);
@@ -283,18 +265,6 @@ impl BelugaPool {
         updated_pool.fee_growth_global_0 = swap_state.fee_growth_global_0;
         updated_pool.fee_growth_global_1 = swap_state.fee_growth_global_1;
 
-        // Credit the creator fee. It is carved out of the LP fee inside the swap
-        // engine and is denominated in the input token, and the swapper already
-        // transferred it in as part of amount_in_used — so we only need to record
-        // the claim here (claim_creator_fees pays it out later).
-        if creator_fee > 0 {
-            let cf = creator_fee as u128;
-            if zero_for_one {
-                updated_pool.creator_fees_0 = updated_pool.creator_fees_0.saturating_add(cf);
-            } else {
-                updated_pool.creator_fees_1 = updated_pool.creator_fees_1.saturating_add(cf);
-            }
-        }
         write_pool_state(&env, &updated_pool);
         
         // Transfer tokens
@@ -545,43 +515,6 @@ impl BelugaPool {
         (fees0, fees1)
     }
     
-    /// Claim creator fees (only creator can call)
-    pub fn claim_creator_fees(env: Env) -> (u128, u128) {
-        extend_instance(&env);
-        let config = read_pool_config(&env);
-        config.creator.require_auth();
-        
-        let mut state = read_pool_state(&env);
-        
-        let fees0 = state.creator_fees_0;
-        let fees1 = state.creator_fees_1;
-        
-        // Reset creator fees
-        state.creator_fees_0 = 0;
-        state.creator_fees_1 = 0;
-        write_pool_state(&env, &state);
-        
-        // Transfer fees to creator
-        if fees0 > 0 {
-            token::Client::new(&env, &state.token0).transfer(
-                &env.current_contract_address(),
-                &config.creator,
-                &safe_u128_to_i128(fees0),
-            );
-        }
-        if fees1 > 0 {
-            token::Client::new(&env, &state.token1).transfer(
-                &env.current_contract_address(),
-                &config.creator,
-                &safe_u128_to_i128(fees1),
-            );
-        }
-        
-        emit_claim_creator_fees(&env, fees0, fees1);
-        
-        (fees0, fees1)
-    }
-    
     // ========================================================
     // INTERNAL HELPERS
     // ========================================================
@@ -698,25 +631,6 @@ impl BelugaPool {
         }
     }
     
-    /// Safe version - returns 0 if factory call fails 
-    fn get_active_creator_fee_bps_safe(env: &Env, config: &PoolConfig) -> i128 {
-        let pool_addr = env.current_contract_address();
-
-        let result = env.try_invoke_contract::<bool, soroban_sdk::Error>(
-            &config.factory,
-            &Symbol::new(env, "is_creator_fee_active"),
-            vec![
-                env,
-                pool_addr.into_val(env),
-                config.creator.clone().into_val(env),
-            ],
-        );
-        
-        match result {
-            Ok(Ok(true)) => config.creator_fee_bps as i128,
-            _ => 0, // Factory call failed or returned false - no creator fee
-        }
-    }
 }
 
 // ============================================================

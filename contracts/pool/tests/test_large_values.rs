@@ -13,9 +13,6 @@ pub struct MockFactory;
 
 #[contractimpl]
 impl MockFactory {
-    pub fn is_creator_fee_active(_e: Env, _pool: Address, _creator: Address) -> bool {
-        false
-    }
     pub fn is_liquidity_locked(_e: Env, _p: Address, _c: Address, _l: i32, _u: i32) -> bool {
         false
     }
@@ -36,7 +33,7 @@ impl<'a> Pool<'a> {
         let creator = Address::generate(env);
         let a = common::create_token(env, &creator);
         let b = common::create_token(env, &creator);
-        let c = common::deploy_pool(env, &factory, &Address::generate(env), &creator, &a, &b, &30, &10, &get_sqrt_ratio_at_tick(tick), &60);
+        let c = common::deploy_pool(env, &factory, &Address::generate(env), &creator, &a, &b, &30, &get_sqrt_ratio_at_tick(tick), &60);
         let s = c.get_pool_state();
         Pool { env, c, t0: s.token0, t1: s.token1 }
     }

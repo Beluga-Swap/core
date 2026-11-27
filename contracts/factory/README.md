@@ -11,7 +11,6 @@ The factory contract provides:
 ### 1. **Pool Deployment**
 - Atomic pool creation (deploy + init + LP + lock)
 - Automatic token ordering
-- Creator fee configuration
 
 ### 2. **Fee Tier Management**
 - Configure fee tiers with tick spacing
@@ -20,8 +19,6 @@ The factory contract provides:
 
 ### 3. **Creator Liquidity Lock**
 - Lock initial LP tokens
-- Creator fee while locked
-- Unlock revokes creator fee permanently
 
 ### 4. **Pool Registry**
 - Track all deployed pools
@@ -64,7 +61,6 @@ pub struct CreatePoolParams {
     pub token_a: Address,
     pub token_b: Address,
     pub fee_bps: u32,
-    pub creator_fee_bps: u32,
     pub initial_sqrt_price_x64: u128,
     pub amount0_desired: i128,
     pub amount1_desired: i128,
@@ -161,7 +157,6 @@ pub struct CreatorLock {
     pub creator: Address,
     pub liquidity: i128,
     pub unlock_time: u32,
-    pub fee_active: bool,
 }
 ```
 
@@ -170,16 +165,11 @@ pub struct CreatorLock {
 pub fn is_liquidity_locked(env: Env, pool: Address) -> bool
 ```
 
-#### `is_creator_fee_active`
-```rust
-pub fn is_creator_fee_active(env: Env, pool: Address) -> bool
-```
-
 #### `unlock_creator_liquidity`
 ```rust
 pub fn unlock_creator_liquidity(env: Env, pool: Address) -> Result<(), FactoryError>
 ```
-**⚠️ REVOKES CREATOR FEE PERMANENTLY!**
+Releases the creator's locked liquidity once the lock period has ended.
 
 ---
 
@@ -305,7 +295,7 @@ stellar contract invoke --id $TOKEN_B --source $SOURCE --network $NETWORK \
 stellar contract invoke --id $FACTORY --source $SOURCE --network $NETWORK \
   -- create_pool \
   --creator $SOURCE \
-  --params '{ "amount0_desired": "1000000000", "amount1_desired": "1000000000", "creator_fee_bps": 100, "fee_bps": 30, "initial_sqrt_price_x64": "18446744073709551616", "lock_duration": 0, "lower_tick": -600, "token_a": "<TOKEN_A_ADDRESS>", "token_b": "<TOKEN_B_ADDRESS>", "upper_tick": 600 }'
+  --params '{ "amount0_desired": "1000000000", "amount1_desired": "1000000000", "fee_bps": 30, "initial_sqrt_price_x64": "18446744073709551616", "lock_duration": 0, "lower_tick": -600, "token_a": "<TOKEN_A_ADDRESS>", "token_b": "<TOKEN_B_ADDRESS>", "upper_tick": 600 }'
 ```
 
 ---
@@ -317,7 +307,6 @@ stellar contract invoke --id $FACTORY --source $SOURCE --network $NETWORK \
 | `token_a` | Address | First token contract address |
 | `token_b` | Address | Second token contract address |
 | `fee_bps` | u32 | Pool fee (must match enabled tier) |
-| `creator_fee_bps` | u32 | Creator fee in basis points |
 | `initial_sqrt_price_x64` | u128 (string) | Initial sqrt price × 2^64 |
 | `amount0_desired` | i128 (string) | Initial liquidity for token0 |
 | `amount1_desired` | i128 (string) | Initial liquidity for token1 |

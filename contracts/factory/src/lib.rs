@@ -122,7 +122,6 @@ impl BelugaFactory {
         let token_a = params.token_a;
         let token_b = params.token_b;
         let fee_bps = params.fee_bps;
-        let creator_fee_bps = params.creator_fee_bps;
         let initial_sqrt_price_x64 = params.initial_sqrt_price_x64;
         let amount0_desired = params.amount0_desired;
         let amount1_desired = params.amount1_desired;
@@ -180,11 +179,6 @@ impl BelugaFactory {
             return Err(FactoryError::InvalidLockDuration);
         }
         
-        // Validate creator fee (0.1% - 10%)
-        if !(10..=1000).contains(&creator_fee_bps) {
-            return Err(FactoryError::InvalidCreatorFee);
-        }
-        
         // Validate price
         if initial_sqrt_price_x64 == 0 {
             return Err(FactoryError::InvalidInitialPrice);
@@ -205,7 +199,6 @@ impl BelugaFactory {
                 token_a.clone(),
                 token_b.clone(),
                 fee_bps,
-                creator_fee_bps,
                 initial_sqrt_price_x64,
                 tick_spacing,
             )
@@ -252,7 +245,6 @@ impl BelugaFactory {
             lock_end,
             is_permanent,
             is_unlocked: false,
-            fee_revoked: false,
         };
         write_creator_lock(&env, &pool_address, &creator, &creator_lock);
         
@@ -267,7 +259,7 @@ impl BelugaFactory {
         Ok(pool_address)
     }
     
-    /// Unlock creator liquidity (REVOKES CREATOR FEE PERMANENTLY!)
+    /// Release the creator's locked liquidity once the lock period has ended
     pub fn unlock_creator_liquidity(
         env: Env,
         pool_address: Address,
@@ -284,7 +276,7 @@ impl BelugaFactory {
         }
         
         if lock.is_unlocked {
-            return Err(FactoryError::CreatorFeeRevoked);
+            return Err(FactoryError::AlreadyUnlocked);
         }
         
         // Check if permanent lock
@@ -298,13 +290,10 @@ impl BelugaFactory {
             return Err(FactoryError::LiquidityStillLocked);
         }
         
-        // REVOKE PERMANENTLY
         lock.is_unlocked = true;
-        lock.fee_revoked = true;
         write_creator_lock(&env, &pool_address, &creator, &lock);
         
         emit_creator_unlocked(&env, &pool_address, &creator, lock.liquidity);
-        emit_creator_fee_revoked(&env, &pool_address, &creator);
         
         Ok(lock.liquidity)
     }
@@ -387,18 +376,6 @@ impl BelugaFactory {
                 let current_ledger = env.ledger().sequence();
                 current_ledger < lock.lock_end
             }
-            None => false,
-        }
-    }
-    
-    /// Check if creator fee is still active (not revoked)
-    pub fn is_creator_fee_active(
-        env: Env,
-        pool_address: Address,
-        creator: Address,
-    ) -> bool {
-        match read_creator_lock(&env, &pool_address, &creator) {
-            Some(lock) => !lock.fee_revoked,
             None => false,
         }
     }

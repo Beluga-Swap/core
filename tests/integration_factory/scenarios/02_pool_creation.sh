@@ -42,7 +42,6 @@ POOL_RESULT=$(soroban contract invoke \
         "token_a": "'"$USDC_ID"'",
         "token_b": "'"$XLM_ID"'",
         "fee_bps": 30,
-        "creator_fee_bps": 100,
         "initial_sqrt_price_x64": "'"$SQRT_PRICE"'",
         "amount0_desired": 10000000,
         "amount1_desired": 10000000,

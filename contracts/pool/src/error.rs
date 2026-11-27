@@ -8,7 +8,6 @@ pub enum PoolError {
     NotInitialized = 101,
 
     InvalidFee = 200,
-    InvalidCreatorFee = 201,
     InvalidTickSpacing = 202,
     InvalidTickRange = 203,
     InvalidTick = 204,

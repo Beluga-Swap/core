@@ -1,6 +1,6 @@
 # BelugaSwap Core
 
-Concentrated liquidity AMM on Stellar Soroban with creator fee incentives.
+Concentrated liquidity AMM on Stellar Soroban.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Soroban](https://img.shields.io/badge/Soroban-Stellar-blue)](https://soroban.stellar.org)
@@ -105,7 +105,6 @@ stellar contract invoke --id $FACTORY --source $SOURCE --network $NETWORK \
     "token_a": "<TOKEN_A_ADDRESS>",
     "token_b": "<TOKEN_B_ADDRESS>",
     "fee_bps": 30,
-    "creator_fee_bps": 100,
     "initial_sqrt_price_x64": 18446744073709551616,
     "amount0_desired": 10000000000,
     "amount1_desired": 10000000000,
@@ -139,14 +138,14 @@ stellar contract invoke --id $FACTORY --source $SOURCE --network $NETWORK \
 | **Q64.64 Format** | Prices stored as `sqrt(price) * 2^64` for precision |
 | **Ticks** | Discrete price points where `price = 1.0001^tick` |
 | **Fee Tiers** | 0.05% (stablecoins), 0.30% (volatile), 1.00% (exotic) |
-| **Creator Fees** | 0.1%-10% of trading fees, requires locked LP |
+| **LP Fees** | The whole swap fee goes to in-range liquidity |
 
 ## Contract Roles
 
 | Role | Permissions |
 |------|-------------|
 | **Admin** | Set fee tiers, update router, transfer admin |
-| **Pool Creator** | Earn creator fees (if LP locked) |
+| **Pool Creator** | Creates the pool with its initial liquidity, optionally locked |
 | **LP Provider** | Add/remove liquidity, collect fees |
 | **Trader** | Swap via Router or direct Pool |
 

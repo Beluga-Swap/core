@@ -55,15 +55,6 @@ pub fn emit_creator_unlocked(env: &Env, pool: &Address, creator: &Address, liqui
         (pool.clone(), creator.clone(), liquidity),
     );
 }
-
-/// Emitted when creator fee is revoked (PERMANENT)
-pub fn emit_creator_fee_revoked(env: &Env, pool: &Address, creator: &Address) {
-    env.events().publish(
-        (Symbol::new(env, "CreatorFeeRevoked"),),
-        (pool.clone(), creator.clone()),
-    );
-}
-
 /// Emitted when fee tier is updated
 pub fn emit_fee_tier_updated(env: &Env, fee_bps: u32, tick_spacing: i32, enabled: bool) {
     env.events().publish(

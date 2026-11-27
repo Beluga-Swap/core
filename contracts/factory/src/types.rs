@@ -30,8 +30,6 @@ pub struct CreatePoolParams {
     pub token_b: Address,
     /// Fee tier (5, 30, or 100 bps)
     pub fee_bps: u32,
-    /// Creator fee share (10-1000 bps = 0.1%-10%)
-    pub creator_fee_bps: u32,
     /// Initial price as sqrt(price) * 2^64
     pub initial_sqrt_price_x64: u128,
     /// Amount of token0 to deposit
@@ -66,12 +64,7 @@ pub struct FeeTier {
 // CREATOR LOCK
 // ============================================================
 
-/// Creator's locked liquidity position
-/// 
-/// Creator fee rules:
-/// - Must lock initial LP to earn creator fees
-/// - Unlock/remove LP → fee_revoked = true (PERMANENT)
-/// - Out of range → temporarily no fees
+/// The pool creator's locked initial liquidity
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct CreatorLock {
@@ -83,8 +76,7 @@ pub struct CreatorLock {
     pub lock_start: u32,
     pub lock_end: u32,          // u32::MAX = permanent
     pub is_permanent: bool,
-    pub is_unlocked: bool,      // true = unlocked
-    pub fee_revoked: bool,      // true = PERMANENT revocation
+    pub is_unlocked: bool,
 }
 
 // ============================================================

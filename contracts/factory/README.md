@@ -9,7 +9,7 @@ Factory contract for deploying and managing BelugaSwap liquidity pools.
 The factory contract provides:
 
 ### 1. **Pool Deployment**
-- Atomic pool creation (deploy + init + LP + lock)
+- Atomic pool creation (deploy + init + initial LP)
 - Automatic token ordering
 
 ### 2. **Fee Tier Management**
@@ -17,10 +17,7 @@ The factory contract provides:
 - Enable/disable fee tiers
 - Multiple fee tier support (0.05%, 0.30%, 1.00%)
 
-### 3. **Creator Liquidity Lock**
-- Lock initial LP tokens
-
-### 4. **Pool Registry**
+### 3. **Pool Registry**
 - Track all deployed pools
 - Lookup by token pair + fee
 - Enumerate all pools
@@ -53,7 +50,8 @@ pub fn create_pool(
     params: CreatePoolParams,
 ) -> Result<Address, FactoryError>
 ```
-Create pool atomically: deploy + initialize + add initial LP + lock.
+Create pool atomically: deploy + initialize + add initial LP. The initial
+position is an ordinary position; the creator can withdraw it at any time.
 
 **Parameters:**
 ```rust
@@ -66,7 +64,6 @@ pub struct CreatePoolParams {
     pub amount1_desired: i128,
     pub lower_tick: i32,
     pub upper_tick: i32,
-    pub lock_duration: u32,
 }
 ```
 
@@ -141,35 +138,6 @@ Up to `limit` pools (at most 100) from creation index `start`.
 ```rust
 pub fn get_total_pools(env: Env) -> u32
 ```
-
----
-
-### Creator Lock Management
-
-#### `get_creator_lock`
-```rust
-pub fn get_creator_lock(env: Env, pool: Address) -> Result<CreatorLock, FactoryError>
-```
-
-**Returns:**
-```rust
-pub struct CreatorLock {
-    pub creator: Address,
-    pub liquidity: i128,
-    pub unlock_time: u32,
-}
-```
-
-#### `is_liquidity_locked`
-```rust
-pub fn is_liquidity_locked(env: Env, pool: Address) -> bool
-```
-
-#### `unlock_creator_liquidity`
-```rust
-pub fn unlock_creator_liquidity(env: Env, pool: Address) -> Result<(), FactoryError>
-```
-Releases the creator's locked liquidity once the lock period has ended.
 
 ---
 
@@ -295,7 +263,7 @@ stellar contract invoke --id $TOKEN_B --source $SOURCE --network $NETWORK \
 stellar contract invoke --id $FACTORY --source $SOURCE --network $NETWORK \
   -- create_pool \
   --creator $SOURCE \
-  --params '{ "amount0_desired": "1000000000", "amount1_desired": "1000000000", "fee_bps": 30, "initial_sqrt_price_x64": "18446744073709551616", "lock_duration": 0, "lower_tick": -600, "token_a": "<TOKEN_A_ADDRESS>", "token_b": "<TOKEN_B_ADDRESS>", "upper_tick": 600 }'
+  --params '{ "amount0_desired": "1000000000", "amount1_desired": "1000000000", "fee_bps": 30, "initial_sqrt_price_x64": "18446744073709551616", "lower_tick": -600, "token_a": "<TOKEN_A_ADDRESS>", "token_b": "<TOKEN_B_ADDRESS>", "upper_tick": 600 }'
 ```
 
 ---
@@ -312,7 +280,6 @@ stellar contract invoke --id $FACTORY --source $SOURCE --network $NETWORK \
 | `amount1_desired` | i128 (string) | Initial liquidity for token1 |
 | `lower_tick` | i32 | Lower tick (divisible by tick_spacing) |
 | `upper_tick` | i32 | Upper tick (divisible by tick_spacing) |
-| `lock_duration` | u32 | Lock duration in seconds (0 = no lock) |
 
 > **Note:** `i128` and `u128` types must be passed as strings in JSON.
 

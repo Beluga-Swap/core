@@ -25,6 +25,5 @@ pub fn default_pool_params(_env: &Env, token_a: &Address, token_b: &Address) -> 
         amount1_desired: 10_000_000,
         lower_tick: -600,
         upper_tick: 600,
-        lock_duration: 120_960,
     }
 }

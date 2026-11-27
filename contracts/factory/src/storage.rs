@@ -2,7 +2,7 @@
 
 use soroban_sdk::{Address, Env, Vec};
 
-use crate::types::{CreatorLock, DataKey, FactoryConfig, FeeTier};
+use crate::types::{DataKey, FactoryConfig, FeeTier};
 
 // ============================================================
 // TTL CONFIG
@@ -131,23 +131,4 @@ fn write_pool_count(env: &Env, count: u32) {
 
 pub fn init_pool_list(env: &Env) {
     write_pool_count(env, 0);
-}
-
-// ============================================================
-// CREATOR LOCK
-// ============================================================
-
-pub fn write_creator_lock(env: &Env, pool: &Address, creator: &Address, lock: &CreatorLock) {
-    let key = DataKey::CreatorLock(pool.clone(), creator.clone());
-    env.storage().persistent().set(&key, lock);
-    extend_ttl(env, &key);
-}
-
-pub fn read_creator_lock(env: &Env, pool: &Address, creator: &Address) -> Option<CreatorLock> {
-    let key = DataKey::CreatorLock(pool.clone(), creator.clone());
-    let result = env.storage().persistent().get(&key);
-    if result.is_some() {
-        extend_ttl(env, &key);
-    }
-    result
 }

@@ -23,8 +23,6 @@ pub enum PoolError {
     OutputDust = 502,
     NoLiquidity = 503,
 
-    PositionLocked = 601,
-
     Overflow = 701,
     InvariantViolated = 702,
 }

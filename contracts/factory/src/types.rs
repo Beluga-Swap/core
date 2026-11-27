@@ -40,8 +40,6 @@ pub struct CreatePoolParams {
     pub lower_tick: i32,
     /// Upper tick boundary
     pub upper_tick: i32,
-    /// Lock duration in ledgers (0 = permanent)
-    pub lock_duration: u32,
 }
 
 // ============================================================
@@ -61,25 +59,6 @@ pub struct FeeTier {
 }
 
 // ============================================================
-// CREATOR LOCK
-// ============================================================
-
-/// The pool creator's locked initial liquidity
-#[contracttype]
-#[derive(Clone, Debug)]
-pub struct CreatorLock {
-    pub pool: Address,
-    pub creator: Address,
-    pub liquidity: i128,
-    pub lower_tick: i32,
-    pub upper_tick: i32,
-    pub lock_start: u32,
-    pub lock_end: u32,          // u32::MAX = permanent
-    pub is_permanent: bool,
-    pub is_unlocked: bool,
-}
-
-// ============================================================
 // STORAGE KEYS
 // ============================================================
 
@@ -96,6 +75,4 @@ pub enum DataKey {
     PoolAt(u32),
     /// Total pool count
     PoolCount,
-    /// Creator lock by (pool, creator)
-    CreatorLock(Address, Address),
 }

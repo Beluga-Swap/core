@@ -46,8 +46,7 @@ POOL_RESULT=$(soroban contract invoke \
         "amount0_desired": 10000000,
         "amount1_desired": 10000000,
         "lower_tick": -600,
-        "upper_tick": 600,
-        "lock_duration": 0
+        "upper_tick": 600
     }' 2>&1)
 
 POOL_ID=$(echo "$POOL_RESULT" | jq -r '.result // .' | tail -1)

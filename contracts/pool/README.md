@@ -16,7 +16,6 @@ The pool contract handles:
 ### 2. **Liquidity Management**
 - Add/remove liquidity in custom price ranges
 - Position tracking with fee accumulation
-- Creator lock enforcement (via Factory)
 
 ### 3. **Fee Collection**
 - LP fee accumulation per position
@@ -24,7 +23,6 @@ The pool contract handles:
 
 ### 4. **Factory & Router Integration**
 - Initialized by Factory with router address
-- Queries Factory for creator lock status
 - Works with Router for multi-hop swaps
 
 ---
@@ -73,8 +71,7 @@ stellar contract invoke \
     "amount0_desired": "1000000000",
     "amount1_desired": "1000000000",
     "lower_tick": -600,
-    "upper_tick": 600,
-    "lock_duration": 0
+    "upper_tick": 600
   }'
 ```
 
@@ -261,7 +258,8 @@ pub fn remove_liquidity(
     amount1_min: i128,
 ) -> (i128, i128)
 ```
-Remove liquidity from a position. Checks creator lock via Factory.
+Remove liquidity from a position. Any owner, the pool creator included, can
+withdraw at any time.
 
 **Returns:** `(amount0, amount1)`
 
@@ -378,27 +376,6 @@ derived from the price.
 
 ---
 
-## 🔒 Creator Lock Integration
-
-Pool queries Factory to check creator lock status:
-
-```rust
-// Called internally during remove_liquidity
-fn is_position_locked(
-    env: &Env,
-    config: &PoolConfig,
-    owner: &Address,
-    lower_tick: i32,
-    upper_tick: i32,
-) -> bool {
-    // Only affects creator's locked position
-    // Queries factory.is_liquidity_locked()
-}
-```
-
-
----
-
 ## ⚠️ Error Codes
 
 Failures surface as `Error(Contract, #code)`.
@@ -418,7 +395,6 @@ Failures surface as `Error(Contract, #code)`.
 | 501 | `SlippageExceeded` | Output below minimum |
 | 502 | `OutputDust` | Swap would produce no output |
 | 503 | `NoLiquidity` | No liquidity to trade against |
-| 601 | `PositionLocked` | Creator lock still active |
 | 701 | `Overflow` | Liquidity total overflow |
 | 702 | `InvariantViolated` | Internal fee check failed (a bug) |
 

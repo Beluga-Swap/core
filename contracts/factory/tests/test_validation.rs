@@ -198,57 +198,6 @@ fn test_minimum_liquidity_valid() {
 }
 
 // ============================================================
-// LOCK DURATION VALIDATION
-// ============================================================
-
-#[test]
-#[should_panic(expected = "Error(Contract, #5)")]
-fn test_lock_duration_too_short() {
-    let env = Env::default();
-    env.mock_all_auths();
-    
-    let (client, _) = common::setup_factory(&env);
-    let creator = Address::generate(&env);
-    let token_a = common::create_token(&env);
-    let token_b = common::create_token(&env);
-    
-    let mut params = common::default_pool_params(&env, &token_a, &token_b);
-    params.lock_duration = 1000; // Below MIN (120_960)
-    
-    client.create_pool(&creator, &params);
-}
-
-#[test]
-fn test_permanent_lock_valid() {
-    let env = Env::default();
-    env.mock_all_auths();
-    
-    let (_client, _) = common::setup_factory(&env);
-    let token_a = common::create_token(&env);
-    let token_b = common::create_token(&env);
-    
-    let mut params = common::default_pool_params(&env, &token_a, &token_b);
-    params.lock_duration = 0; // Permanent lock
-    
-    // Should be valid
-}
-
-#[test]
-fn test_minimum_lock_duration_valid() {
-    let env = Env::default();
-    env.mock_all_auths();
-    
-    let (_client, _) = common::setup_factory(&env);
-    let token_a = common::create_token(&env);
-    let token_b = common::create_token(&env);
-    
-    let mut params = common::default_pool_params(&env, &token_a, &token_b);
-    params.lock_duration = 120_960; // Exactly minimum (7 days)
-    
-    // Should be valid
-}
-
-// ============================================================
 // PRICE VALIDATION
 // ============================================================
 

@@ -22,14 +22,6 @@ pub enum FactoryError {
     
     // Liquidity
     InsufficientInitialLiquidity = 20,
-    InvalidLockDuration = 21,
-    LiquidityStillLocked = 22,
-    
-    // Creator
-    NotPoolCreator = 30,
-    /// Creator lock was already released
-    AlreadyUnlocked = 31,
-    CreatorLockNotFound = 32,
     
     // Admin
     Unauthorized = 50,

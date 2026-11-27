@@ -9,7 +9,6 @@ use proptest::prelude::*;
 // VALIDATION LOGIC
 // ============================================================
 
-const MIN_LOCK_DURATION: u32 = 120_960; // ~7 days
 const MIN_INITIAL_LIQUIDITY: i128 = 1_000_000;
 const MAX_FEE_BPS: u32 = 100;
 
@@ -31,10 +30,6 @@ fn validate_tick_spacing(tick: i32, spacing: i32) -> bool {
 
 fn validate_amounts(amt0: i128, amt1: i128) -> bool {
     amt0 >= MIN_INITIAL_LIQUIDITY && amt1 >= MIN_INITIAL_LIQUIDITY
-}
-
-fn validate_lock_duration(duration: u32) -> bool {
-    duration == 0 || duration >= MIN_LOCK_DURATION
 }
 
 fn validate_sqrt_price(price: u128) -> bool {
@@ -184,34 +179,6 @@ proptest! {
     }
     
     // ========================================================
-    // LOCK DURATION VALIDATION
-    // ========================================================
-    
-    #[test]
-    fn fuzz_permanent_lock(
-        _seed in 0u8..10u8,
-    ) {
-        let result = validate_lock_duration(0);
-        prop_assert!(result, "Permanent lock (0) should be valid");
-    }
-    
-    #[test]
-    fn fuzz_valid_lock_duration(
-        duration in MIN_LOCK_DURATION..=31536000u32,
-    ) {
-        let result = validate_lock_duration(duration);
-        prop_assert!(result, "Duration >= MIN_LOCK_DURATION should be valid");
-    }
-    
-    #[test]
-    fn fuzz_invalid_lock_duration(
-        duration in 1u32..MIN_LOCK_DURATION,
-    ) {
-        let result = validate_lock_duration(duration);
-        prop_assert!(!result, "Duration < MIN_LOCK_DURATION should be invalid");
-    }
-    
-    // ========================================================
     // SQRT PRICE VALIDATION
     // ========================================================
     
@@ -240,7 +207,6 @@ proptest! {
         amt0 in MIN_INITIAL_LIQUIDITY..10_000_000i128,
         amt1 in MIN_INITIAL_LIQUIDITY..10_000_000i128,
         fee_tier in prop::sample::select(vec![5u32, 30, 100]),
-        lock_duration in prop::sample::select(vec![0u32, MIN_LOCK_DURATION, MIN_LOCK_DURATION * 2]),
     ) {
         let spacing = get_tick_spacing(fee_tier);
         let lower = -600;
@@ -253,7 +219,6 @@ proptest! {
         prop_assert!(validate_tick_spacing(lower, spacing));
         prop_assert!(validate_tick_spacing(upper, spacing));
         prop_assert!(validate_amounts(amt0, amt1));
-        prop_assert!(validate_lock_duration(lock_duration));
         prop_assert!(validate_sqrt_price(1u128 << 64));
     }
     
@@ -261,18 +226,13 @@ proptest! {
     fn fuzz_detect_any_invalid_param(
         valid_amt in MIN_INITIAL_LIQUIDITY..10_000_000i128,
         invalid_amt in 0i128..MIN_INITIAL_LIQUIDITY,
-        valid_lock in MIN_LOCK_DURATION..=1000000u32,
-        invalid_lock in 1u32..MIN_LOCK_DURATION,
     ) {
         // At least one validation should fail
-        let all_valid = 
-            validate_amounts(valid_amt, valid_amt) &&
-            validate_lock_duration(valid_lock);
-            
-        let has_invalid = 
+        let all_valid = validate_amounts(valid_amt, valid_amt);
+
+        let has_invalid =
             !validate_amounts(invalid_amt, valid_amt) ||
-            !validate_amounts(valid_amt, invalid_amt) ||
-            !validate_lock_duration(invalid_lock);
+            !validate_amounts(valid_amt, invalid_amt);
         
         prop_assert!(all_valid, "All valid params should pass");
         prop_assert!(has_invalid, "Any invalid param should fail");
@@ -294,18 +254,6 @@ fn test_boundary_amounts() {
     
     // Zero
     assert!(!validate_amounts(0, 0));
-}
-
-#[test]
-fn test_boundary_lock_duration() {
-    // Permanent
-    assert!(validate_lock_duration(0));
-    
-    // Just below minimum
-    assert!(!validate_lock_duration(MIN_LOCK_DURATION - 1));
-    
-    // Exactly minimum
-    assert!(validate_lock_duration(MIN_LOCK_DURATION));
 }
 
 #[test]
